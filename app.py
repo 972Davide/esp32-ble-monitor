@@ -6,7 +6,7 @@ import time
 st.set_page_config(page_title="Monitoraggio BLE ESP32", layout="wide")
 
 # Inserisci qui l'URL del tuo Google Apps Script Web App
-APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwXfEt96P6w6GvyLkTyvb2fqSPb06DeVW5z3jKuo9PRuZ5lI83CMcl3Z_V69oxWF3Ay/exec"
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyrBtPq1vy9E7A1G8x9K1QVzIwo9Hw5kKSEDYjSWmh9aViiV7Vwbix2Cs80V1vvDrmd/exec"
 
 
 st.title("🛡️ Dashboard Monitoraggio BLE")
