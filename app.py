@@ -21,17 +21,18 @@ with st.expander("📋 Dispositivi Autorizzati (Whitelist)", expanded=False):
     st.table(pd.DataFrame(whitelist_data))
 
 # -------------------------------------------------------------------------
-# FUNZIONE RECUPERO DATI
+# FUNZIONE RECUPERO DATI (Con timeout esteso a 15s)
 # -------------------------------------------------------------------------
+@st.cache_data(ttl=5) # Mantiene la cache per 5 secondi per velocizzare il caricamento
 def get_historical_data():
     try:
         headers = {"Accept": "application/json"}
-        response = requests.get(APPS_SCRIPT_URL, headers=headers, timeout=5, allow_redirects=True)
+        # Timeout aumentato a 15 secondi per evitare l'errore di Read Timeout
+        response = requests.get(APPS_SCRIPT_URL, headers=headers, timeout=15, allow_redirects=True)
         if response.status_code == 200:
             data = response.json()
             if isinstance(data, list) and len(data) > 0:
                 df = pd.DataFrame(data)
-                # Conversione tipi per i grafici
                 df["distance"] = pd.to_numeric(df["distance"], errors='coerce').fillna(0)
                 df["rssi"] = pd.to_numeric(df["rssi"], errors='coerce').fillna(0)
                 return df
@@ -79,7 +80,6 @@ if not df.empty and len(df) > 1:
 
     with col_chart1:
         st.markdown("##### 📈 Andamento Distanza e RSSI nel Tempo")
-        # Grafico a linee per la distanza
         fig_dist = px.line(
             df, 
             x="timestamp", 
@@ -93,7 +93,6 @@ if not df.empty and len(df) > 1:
 
     with col_chart2:
         st.markdown("##### 🍩 Distribuzione Rilevamenti per MAC Address")
-        # Grafico a ciambella per frequenza MAC
         fig_mac = px.pie(
             df, 
             names="mac", 
@@ -109,7 +108,6 @@ if not df.empty and len(df) > 1:
     # -------------------------------------------------------------------------
     st.subheader("📜 Registro Ultimi Eventi")
     
-    # Filtro rapido per tipo di evento
     filtro_stato = st.multiselect(
         "Filtra per Stato Evento:",
         options=df["status"].unique(),
@@ -117,8 +115,9 @@ if not df.empty and len(df) > 1:
     )
     
     df_filtered = df[df["status"].isin(filtro_stato)]
-    st.dataframe(df_filtered.iloc[::-1], use_container_width=True)  # Ordine decrescente
+    st.dataframe(df_filtered.iloc[::-1], use_container_width=True)
 
 # Pulsante di Aggiornamento
 if st.button("🔄 Aggiorna Dashboard"):
+    st.cache_data.clear()
     st.rerun()
