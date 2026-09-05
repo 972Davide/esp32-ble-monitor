@@ -27,14 +27,18 @@ st.info("Isteresi attiva: Ingresso 5m - 7m | Reset > 15m")
 status_container = st.empty()
 
 def get_latest_data():
-    if "INSERISCI_QUI" in APPS_SCRIPT_URL:
-        return None
     try:
-        response = requests.get(APPS_SCRIPT_URL, timeout=5)
+        headers = {"Accept": "application/json"}
+        response = requests.get(APPS_SCRIPT_URL, headers=headers, timeout=5, allow_redirects=True)
+        
         if response.status_code == 200:
             return response.json()
+        else:
+            st.error(f"Google Apps Script ha restituito il codice HTTP: {response.status_code}")
+    except requests.exceptions.JSONDecodeError:
+        st.error("Errore: Google Apps Script ha restituito HTML anziché JSON. Verifica di aver aggiornato la distribuzione su Google.")
     except Exception as e:
-        st.error(f"Errore connessione Google Apps Script: {e}")
+        st.error(f"Errore di connessione: {e}")
     return None
 
 data = get_latest_data()
