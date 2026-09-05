@@ -1,11 +1,10 @@
 import streamlit as st
 import pandas as pd
 import requests
-import time
 
 st.set_page_config(page_title="Monitoraggio BLE ESP32", layout="wide")
 
-# URL della tua Web App su Google Apps Script
+# URL aggiornato della tua Web App su Google Apps Script
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyxdcInWY2bY0aJEnHzmxamgQ6qo3I_CnI4quqypDoMrTOMoYuL16pQyVy8JsExb93K/exec"
 
 st.title("🛡️ Dashboard Monitoraggio BLE")
@@ -45,15 +44,24 @@ with status_container.container():
     if data:
         col1, col2, col3, col4 = st.columns(4)
         
-        status = data.get("status", "N/A")
-        if "ALLARME" in status:
+        status = str(data.get("status", "N/A"))
+        if "ALLARME" in status.upper():
             col1.metric("Stato Allarme", status, delta="Rilevato", delta_color="inverse")
         else:
             col1.metric("Stato Allarme", status)
 
-        col2.metric("MAC Rilevato", data.get("mac", "N/A"))
-        col3.metric("Distanza Stimata", f"{data.get('distance', 0)} m")
-        col4.metric("RSSI", f"{data.get('rssi', 0)} dBm")
+        mac = data.get("mac", "N/A")
+        col2.metric("MAC Rilevato", mac)
+
+        # Gestione sicura del formato per Distanza e RSSI
+        raw_distance = data.get("distance", 0)
+        raw_rssi = data.get("rssi", 0)
+
+        dist_val = f"{raw_distance} m" if str(raw_distance) != "N/D" else "N/D"
+        rssi_val = f"{raw_rssi} dBm" if str(raw_rssi) != "N/D" else "N/D"
+
+        col3.metric("Distanza Stimata", dist_val)
+        col4.metric("RSSI", rssi_val)
         
         if "timestamp" in data:
             st.caption(f"Ultimo aggiornamento registrato: {data['timestamp']}")
