@@ -5,9 +5,8 @@ import time
 
 st.set_page_config(page_title="Monitoraggio BLE ESP32", layout="wide")
 
-# Inserisci qui l'URL del tuo Google Apps Script Web App
+# URL della tua Web App su Google Apps Script
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyrBtPq1vy9E7A1G8x9K1QVzIwo9Hw5kKSEDYjSWmh9aViiV7Vwbix2Cs80V1vvDrmd/exec"
-
 
 st.title("🛡️ Dashboard Monitoraggio BLE")
 
@@ -23,7 +22,6 @@ st.table(pd.DataFrame(whitelist_data))
 st.subheader("Stato Rilevamento Intrusione")
 st.info("Isteresi attiva: Ingresso 5m - 7m | Reset > 15m")
 
-# Placeholder per aggiornamento dati in tempo reale
 status_container = st.empty()
 
 def get_latest_data():
@@ -46,13 +44,22 @@ data = get_latest_data()
 with status_container.container():
     if data:
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Stato Allarme", data.get("status", "N/A"))
+        
+        status = data.get("status", "N/A")
+        if "ALLARME" in status:
+            col1.metric("Stato Allarme", status, delta="Rilevato", delta_color="inverse")
+        else:
+            col1.metric("Stato Allarme", status)
+
         col2.metric("MAC Rilevato", data.get("mac", "N/A"))
         col3.metric("Distanza Stimata", f"{data.get('distance', 0)} m")
         col4.metric("RSSI", f"{data.get('rssi', 0)} dBm")
+        
+        if "timestamp" in data:
+            st.caption(f"Ultimo aggiornamento registrato: {data['timestamp']}")
     else:
-        st.warning("Incolla l'URL di Google Apps Script in app.py per visualizzare i dati live.")
+        st.warning("Impossibile recuperare i dati da Google Sheets. Verifica la nuova distribuzione su Apps Script.")
 
-# Pulsante per aggiornare i dati
+# Pulsante di aggiornamento manuale
 if st.button("Aggiorna Dati"):
     st.rerun()
