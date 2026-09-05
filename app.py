@@ -1,73 +1,124 @@
 import streamlit as st
 import pandas as pd
 import requests
+import plotly.express as px
 
-st.set_page_config(page_title="Monitoraggio BLE ESP32", layout="wide")
+st.set_page_config(page_title="Monitoraggio BLE ESP32 - Advanced", layout="wide")
 
-# URL aggiornato della tua Web App su Google Apps Script
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyxdcInWY2bY0aJEnHzmxamgQ6qo3I_CnI4quqypDoMrTOMoYuL16pQyVy8JsExb93K/exec"
 
-st.title("🛡️ Dashboard Monitoraggio BLE")
+st.title("🛡️ Dashboard Monitoraggio & Analytics BLE")
 
-# Tabella Dispositivi Autorizzati (Whitelist)
-st.subheader("Dispositivi Autorizzati (Whitelist)")
-whitelist_data = {
-    "Dispositivo": ["Dispositivo 1", "Dispositivo 2", "Dispositivo 3"],
-    "MAC Address": ["1c:3d:48:d6:f1:f0", "de:cd:2f:73:96:d3", "12:fc:96:71:ac:84"],
-    "Stato": ["Autorizzato", "Autorizzato", "Autorizzato"]
-}
-st.table(pd.DataFrame(whitelist_data))
+# -------------------------------------------------------------------------
+# WHITELIST DISPOSITIVI
+# -------------------------------------------------------------------------
+with st.expander("📋 Dispositivi Autorizzati (Whitelist)", expanded=False):
+    whitelist_data = {
+        "Dispositivo": ["Dispositivo 1", "Dispositivo 2", "Dispositivo 3"],
+        "MAC Address": ["1c:3d:48:d6:f1:f0", "de:cd:2f:73:96:d3", "12:fc:96:71:ac:84"],
+        "Stato": ["Autorizzato", "Autorizzato", "Autorizzato"]
+    }
+    st.table(pd.DataFrame(whitelist_data))
 
-st.subheader("Stato Rilevamento Intrusione")
-st.info("Isteresi attiva: Ingresso 5m - 7m | Reset > 15m")
-
-status_container = st.empty()
-
-def get_latest_data():
+# -------------------------------------------------------------------------
+# FUNZIONE RECUPERO DATI
+# -------------------------------------------------------------------------
+def get_historical_data():
     try:
         headers = {"Accept": "application/json"}
         response = requests.get(APPS_SCRIPT_URL, headers=headers, timeout=5, allow_redirects=True)
-        
         if response.status_code == 200:
-            return response.json()
-        else:
-            st.error(f"Google Apps Script ha restituito il codice HTTP: {response.status_code}")
-    except requests.exceptions.JSONDecodeError:
-        st.error("Errore: Google Apps Script ha restituito HTML anziché JSON. Verifica di aver aggiornato la distribuzione su Google.")
+            data = response.json()
+            if isinstance(data, list) and len(data) > 0:
+                df = pd.DataFrame(data)
+                # Conversione tipi per i grafici
+                df["distance"] = pd.to_numeric(df["distance"], errors='coerce').fillna(0)
+                df["rssi"] = pd.to_numeric(df["rssi"], errors='coerce').fillna(0)
+                return df
+            elif isinstance(data, dict):
+                return pd.DataFrame([data])
     except Exception as e:
-        st.error(f"Errore di connessione: {e}")
-    return None
+        st.error(f"Errore caricamento dati: {e}")
+    return pd.DataFrame()
 
-data = get_latest_data()
+df = get_historical_data()
 
-with status_container.container():
-    if data:
-        col1, col2, col3, col4 = st.columns(4)
-        
-        status = str(data.get("status", "N/A"))
-        if "ALLARME" in status.upper():
-            col1.metric("Stato Allarme", status, delta="Rilevato", delta_color="inverse")
-        else:
-            col1.metric("Stato Allarme", status)
+# -------------------------------------------------------------------------
+# METRICHE ISTANTANEE (ULTIMO EVENTO)
+# -------------------------------------------------------------------------
+st.subheader("📍 Stato Attuale in Tempo Reale")
 
-        mac = data.get("mac", "N/A")
-        col2.metric("MAC Rilevato", mac)
-
-        # Gestione sicura del formato per Distanza e RSSI
-        raw_distance = data.get("distance", 0)
-        raw_rssi = data.get("rssi", 0)
-
-        dist_val = f"{raw_distance} m" if str(raw_distance) != "N/D" else "N/D"
-        rssi_val = f"{raw_rssi} dBm" if str(raw_rssi) != "N/D" else "N/D"
-
-        col3.metric("Distanza Stimata", dist_val)
-        col4.metric("RSSI", rssi_val)
-        
-        if "timestamp" in data:
-            st.caption(f"Ultimo aggiornamento registrato: {data['timestamp']}")
+if not df.empty:
+    latest = df.iloc[-1]
+    
+    col1, col2, col3, col4 = st.columns(4)
+    status_text = str(latest.get("status", "N/A"))
+    
+    if "ALLARME" in status_text.upper():
+        col1.metric("Stato Allarme", status_text, delta="⚠️ Intrusione", delta_color="inverse")
     else:
-        st.warning("Impossibile recuperare i dati da Google Sheets. Verifica la nuova distribuzione su Apps Script.")
+        col1.metric("Stato Allarme", status_text)
 
-# Pulsante di aggiornamento manuale
-if st.button("Aggiorna Dati"):
+    col2.metric("MAC Rilevato", latest.get("mac", "N/A"))
+    col3.metric("Distanza Stimata", f"{latest.get('distance', 0)} m")
+    col4.metric("RSSI", f"{latest.get('rssi', 0)} dBm")
+    
+    st.caption(f"Ultima sincronizzazione: {latest.get('timestamp', 'N/A')}")
+else:
+    st.warning("Nessun dato disponibile da Google Sheets.")
+
+st.divider()
+
+# -------------------------------------------------------------------------
+# GRAFICI & ANALISI STORICA
+# -------------------------------------------------------------------------
+if not df.empty and len(df) > 1:
+    st.subheader("📊 Grafici e Trend degli Eventi")
+
+    col_chart1, col_chart2 = st.columns(2)
+
+    with col_chart1:
+        st.markdown("##### 📈 Andamento Distanza e RSSI nel Tempo")
+        # Grafico a linee per la distanza
+        fig_dist = px.line(
+            df, 
+            x="timestamp", 
+            y="distance", 
+            color="status",
+            markers=True,
+            labels={"distance": "Distanza (m)", "timestamp": "Ora Evento"},
+            title="Variazione Distanza Bersaglio"
+        )
+        st.plotly_chart(fig_dist, use_container_width=True)
+
+    with col_chart2:
+        st.markdown("##### 🍩 Distribuzione Rilevamenti per MAC Address")
+        # Grafico a ciambella per frequenza MAC
+        fig_mac = px.pie(
+            df, 
+            names="mac", 
+            title="Frequenza di scansione per Dispositivo",
+            hole=0.4
+        )
+        st.plotly_chart(fig_mac, use_container_width=True)
+
+    st.divider()
+
+    # -------------------------------------------------------------------------
+    # TABELLA ULTIMI EVENTI REGISTRATI
+    # -------------------------------------------------------------------------
+    st.subheader("📜 Registro Ultimi Eventi")
+    
+    # Filtro rapido per tipo di evento
+    filtro_stato = st.multiselect(
+        "Filtra per Stato Evento:",
+        options=df["status"].unique(),
+        default=df["status"].unique()
+    )
+    
+    df_filtered = df[df["status"].isin(filtro_stato)]
+    st.dataframe(df_filtered.iloc[::-1], use_container_width=True)  # Ordine decrescente
+
+# Pulsante di Aggiornamento
+if st.button("🔄 Aggiorna Dashboard"):
     st.rerun()
