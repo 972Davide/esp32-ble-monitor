@@ -25,6 +25,8 @@ filtro_distanza = st.sidebar.selectbox(
     options=["Tutti i dispositivi", "Solo entro 7 metri", "Solo oltre 7 metri"]
 )
 
+solo_sospetti = st.sidebar.checkbox("🚨 Mostra solo Dispositivi Sospetti/Occasionali", value=False)
+
 max_records = st.sidebar.slider("Numero massimo di eventi da analizzare:", 10, 500, 100)
 
 st.title("🛡️ Dashboard Monitoraggio & Analytics BLE")
@@ -41,7 +43,7 @@ with st.expander("📋 Dispositivi Autorizzati (Whitelist)", expanded=False):
     st.table(pd.DataFrame(whitelist_data))
 
 # -------------------------------------------------------------------------
-# FUNZIONE RECUPERO DATI CON CLEANUP AVANZATO (PULIZIA REFUSI E CORRUZIONI)
+# FUNZIONE RECUPERO DATI CON PULIZIA E NORMALIZZAZIONE AVANZATA
 # -------------------------------------------------------------------------
 @st.cache_data(ttl=2)
 def get_historical_data():
@@ -58,11 +60,10 @@ def get_historical_data():
                 # Conversione Timestamp in Datetime
                 df_res["dt"] = pd.to_datetime(df_res["timestamp"], dayfirst=True, errors='coerce')
                 
-                # Pulizia avanzata della colonna "status"
+                # Normalizzazione e Pulizia dello Stato (Correzione refusi hardware/trasmissione)
                 if "status" in df_res.columns:
                     df_res["status"] = df_res["status"].astype(str).str.strip()
                     
-                    # Mappa di sostituzione per correggere refusi di trasmissione e caratteri corrotti
                     corrections = {
                         "eset (Disconnesso)": "Reset (Disconnesso)",
                         "eset": "Reset (Disconnesso)",
@@ -73,7 +74,7 @@ def get_historical_data():
                     }
                     df_res["status"] = df_res["status"].replace(corrections)
                     
-                    # Regex di sicurezza: se la stringa contiene "5m-7m" o caratteri corrotti simili, imposta ALLARME
+                    # Filtri di sicurezza tramite espressioni regolari
                     df_res.loc[df_res["status"].str.contains(r"5m-7m", case=False, na=False), "status"] = "ALLARME (5m-7m)"
                     df_res.loc[df_res["status"].str.contains(r"eset", case=False, na=False), "status"] = "Reset (Disconnesso)"
 
@@ -106,6 +107,13 @@ if not df_raw.empty and "dt" in df_raw.columns:
 else:
     df = df_raw
 
+# Mappa Colori Univoca per i Grafici
+color_map = {
+    "ALLARME (5m-7m)": "#FF4B4B",       # Rosso
+    "Reset (Fuori Portata)": "#00C0F2",  # Azzurro
+    "Reset (Disconnesso)": "#7E828A"    # Grigio
+}
+
 # -------------------------------------------------------------------------
 # METRICHE ISTANTANEE (ULTIMO EVENTO)
 # -------------------------------------------------------------------------
@@ -132,12 +140,48 @@ else:
 
 st.divider()
 
-# Mappa Colori Univoca per Tutti i Grafici
-color_map = {
-    "ALLARME (5m-7m)": "#FF4B4B",       # Rosso
-    "Reset (Fuori Portata)": "#00C0F2",  # Azzurro
-    "Reset (Disconnesso)": "#7E828A"    # Grigio
-}
+# -------------------------------------------------------------------------
+# CALCOLO PERMANENZA ED ANOMALY DETECTION (LOGICA INVERSA)
+# -------------------------------------------------------------------------
+permanenza = pd.DataFrame()
+if not df.empty and len(df) > 1:
+    df_calc = df.dropna(subset=["dt"]).sort_values("dt")
+    if not df_calc.empty:
+        permanenza = df_calc.groupby("mac").agg(
+            Primo_Avvistamento=("dt", "min"),
+            Ultimo_Avvistamento=("dt", "max"),
+            Rilevazioni_Totali=("status", "count"),
+            Distanza_Media=("distance", "mean"),
+            Ultimo_Stato=("status", "last")
+        ).reset_index()
+
+        permanenza["Durata_Delta"] = permanenza["Ultimo_Avvistamento"] - permanenza["Primo_Avvistamento"]
+        permanenza["Permanenza (Minuti)"] = (permanenza["Durata_Delta"].dt.total_seconds() / 60).round(1)
+        permanenza["Distanza_Media"] = permanenza["Distanza_Media"].round(2)
+
+        # Regola di classificazione del comportamento (Anomaly Detection)
+        def classifica_comportamento(row):
+            minuti = row["Permanenza (Minuti)"]
+            conteggio = row["Rilevazioni_Totali"]
+            
+            # Dispositivo stazionario/noto: presente per molto tempo o con centinaia di pacchetti
+            if minuti >= 60 or conteggio >= 30:
+                return "🏠 Abituale / Stazionario"
+            # Breve presenza (< 15 min) con pochi pacchetti -> Possibile Passante o Intruso
+            elif minuti <= 15:
+                return "🚨 SOSPETTO (Nuovo / Breve Stazionamento)"
+            else:
+                return "🔍 Occasionale"
+
+        permanenza["Profilo Comportamento"] = permanenza.apply(classifica_comportamento, axis=1)
+
+        permanenza["Primo Avvistamento"] = permanenza["Primo_Avvistamento"].dt.strftime("%d/%m %H:%M:%S")
+        permanenza["Ultimo Avvistamento"] = permanenza["Ultimo_Avvistamento"].dt.strftime("%d/%m %H:%M:%S")
+
+        # Filtro opzionale per mostrare solo dispositivi sospetti
+        if solo_sospetti:
+            mac_sospetti = permanenza[permanenza["Profilo Comportamento"].str.contains("SOSPETTO|Occasionale")]["mac"].tolist()
+            df = df[df["mac"].isin(mac_sospetti)]
 
 # -------------------------------------------------------------------------
 # GRAFICI & ANALISI STORICA
@@ -170,7 +214,7 @@ if not df.empty and len(df) > 1:
         st.plotly_chart(fig_dist, use_container_width=True)
 
     with col_chart2:
-        st.markdown("##### 🏆 Ranking MAC Address (Dal più frequente)")
+        st.markdown("##### 🏆 Ranking MAC Address (Frequenza Rilevamenti)")
         mac_counts = df["mac"].value_counts().reset_index()
         mac_counts.columns = ["MAC Address", "Conteggio"]
 
@@ -188,28 +232,12 @@ if not df.empty and len(df) > 1:
         st.plotly_chart(fig_mac, use_container_width=True)
 
     # -------------------------------------------------------------------------
-    # TEMPI DI PERMANENZA (DWELL TIME)
+    # TEMPI DI PERMANENZA & CLASSIFICAZIONE COMPORTAMENTALE
     # -------------------------------------------------------------------------
     st.divider()
-    st.subheader("⏱️ Tempi di Permanenza Dispositivi")
+    st.subheader("⏱️ Tempi di Permanenza & Classificazione Sospetti")
 
-    df_calc = df.dropna(subset=["dt"]).sort_values("dt")
-    if not df_calc.empty:
-        permanenza = df_calc.groupby("mac").agg(
-            Primo_Avvistamento=("dt", "min"),
-            Ultimo_Avvistamento=("dt", "max"),
-            Rilevazioni_Totali=("status", "count"),
-            Distanza_Media=("distance", "mean"),
-            Ultimo_Stato=("status", "last")
-        ).reset_index()
-
-        permanenza["Durata_Delta"] = permanenza["Ultimo_Avvistamento"] - permanenza["Primo_Avvistamento"]
-        permanenza["Permanenza (Minuti)"] = (permanenza["Durata_Delta"].dt.total_seconds() / 60).round(1)
-        permanenza["Distanza_Media"] = permanenza["Distanza_Media"].round(2)
-
-        permanenza["Primo Avvistamento"] = permanenza["Primo_Avvistamento"].dt.strftime("%d/%m %H:%M:%S")
-        permanenza["Ultimo Avvistamento"] = permanenza["Ultimo_Avvistamento"].dt.strftime("%d/%m %H:%M:%S")
-
+    if not permanenza.empty:
         col_perm1, col_perm2 = st.columns([2, 1])
 
         with col_perm1:
@@ -228,14 +256,13 @@ if not df.empty and len(df) > 1:
             st.plotly_chart(fig_perm, use_container_width=True)
 
         with col_perm2:
-            st.markdown("##### 📌 Dettagli Permanenza")
+            st.markdown("##### 🔍 Profilo di Rischio Dispositivi")
             st.dataframe(
                 permanenza[[
                     "mac", 
+                    "Profilo Comportamento",
                     "Permanenza (Minuti)", 
-                    "Distanza_Media", 
-                    "Primo Avvistamento", 
-                    "Ultimo Avvistamento"
+                    "Distanza_Media"
                 ]].rename(columns={
                     "mac": "MAC Address", 
                     "Distanza_Media": "Dist. Media (m)"
