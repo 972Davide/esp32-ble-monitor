@@ -4,17 +4,20 @@ import requests
 import plotly.express as px
 import time
 
-# Must be the first Streamlit command
 st.set_page_config(page_title="Monitoraggio BLE ESP32 - Advanced", layout="wide")
 
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyxdcInWY2bY0aJEnHzmxamgQ6qo3I_CnI4quqypDoMrTOMoYuL16pQyVy8JsExb93K/exec"
 
 # -------------------------------------------------------------------------
-# SIDEBAR - AUTO REFRESH CONFIGURATION
+# SIDEBAR - CONFIGURAZIONE & FILTRI
 # -------------------------------------------------------------------------
 st.sidebar.title("⚙️ Impostazioni Dashboard")
 auto_refresh = st.sidebar.checkbox("Attiva Auto-Refresh Real-Time", value=True)
 refresh_interval = st.sidebar.slider("Intervallo di aggiornamento (sec):", 3, 20, 5)
+
+st.sidebar.divider()
+st.sidebar.subheader("🔍 Filtro Storico Dati")
+max_records = st.sidebar.slider("Numero di ultimi eventi da analizzare:", 10, 200, 50)
 
 st.title("🛡️ Dashboard Monitoraggio & Analytics BLE")
 
@@ -50,7 +53,10 @@ def get_historical_data():
         st.error(f"Errore caricamento dati: {e}")
     return pd.DataFrame()
 
-df = get_historical_data()
+df_raw = get_historical_data()
+
+# Applica il limite massimo di record impostato nella sidebar
+df = df_raw.tail(max_records) if not df_raw.empty else df_raw
 
 # -------------------------------------------------------------------------
 # METRICHE ISTANTANEE (ULTIMO EVENTO)
@@ -101,11 +107,9 @@ if not df.empty and len(df) > 1:
 
     with col_chart2:
         st.markdown("##### 🏆 Ranking MAC Address (Dal più frequente)")
-        # Calcolo frequenza MAC address ordinato dal più alto al più basso
         mac_counts = df["mac"].value_counts().reset_index()
         mac_counts.columns = ["MAC Address", "Conteggio"]
 
-        # Grafico a barre orizzontali ordinato
         fig_mac = px.bar(
             mac_counts,
             x="Conteggio",
@@ -116,28 +120,41 @@ if not df.empty and len(df) > 1:
             color_continuous_scale="Reds",
             title="Frequenza Rilevamenti per MAC"
         )
-        # Ordina l'asse Y per mostrare il più frequente in alto
         fig_mac.update_layout(yaxis={"categoryorder": "total ascending"})
         st.plotly_chart(fig_mac, use_container_width=True)
 
-    # Tabella Riepilogativa del Conteggio MAC
     with st.expander("📊 Tabella Conteggio Dettagliato MAC Address", expanded=False):
         st.dataframe(mac_counts, use_container_width=True)
 
     st.divider()
 
     # -------------------------------------------------------------------------
-    # TABELLA ULTIMI EVENTI REGISTRATI
+    # TABELLA EVENTI & ESPORTAZIONE DATI
     # -------------------------------------------------------------------------
     st.subheader("📜 Registro Ultimi Eventi")
     
-    filtro_stato = st.multiselect(
-        "Filtra per Stato Evento:",
-        options=df["status"].unique(),
-        default=df["status"].unique()
-    )
+    col_filter, col_export = st.columns([3, 1])
+    
+    with col_filter:
+        filtro_stato = st.multiselect(
+            "Filtra per Stato Evento:",
+            options=df["status"].unique(),
+            default=df["status"].unique()
+        )
     
     df_filtered = df[df["status"].isin(filtro_stato)]
+    
+    with col_export:
+        st.markdown("  ")
+        # Pulsante per scaricare i dati in formato CSV
+        csv_data = df_filtered.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Scarica Dati (CSV)",
+            data=csv_data,
+            file_name="storico_rilevamenti_ble.csv",
+            mime="text/csv"
+        )
+    
     st.dataframe(df_filtered.iloc[::-1], use_container_width=True)
 
 # -------------------------------------------------------------------------
