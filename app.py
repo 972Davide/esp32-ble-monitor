@@ -41,7 +41,7 @@ with st.expander("📋 Dispositivi Autorizzati (Whitelist)", expanded=False):
     st.table(pd.DataFrame(whitelist_data))
 
 # -------------------------------------------------------------------------
-# FUNZIONE RECUPERO DATI CON CLEANUP STRINGHE (CORREZIONE REFUSI)
+# FUNZIONE RECUPERO DATI CON CLEANUP AVANZATO (PULIZIA REFUSI E CORRUZIONI)
 # -------------------------------------------------------------------------
 @st.cache_data(ttl=2)
 def get_historical_data():
@@ -58,14 +58,25 @@ def get_historical_data():
                 # Conversione Timestamp in Datetime
                 df_res["dt"] = pd.to_datetime(df_res["timestamp"], dayfirst=True, errors='coerce')
                 
-                # Normalizzazione e Pulizia dello Stato (correzione refusi come "eset")
+                # Pulizia avanzata della colonna "status"
                 if "status" in df_res.columns:
                     df_res["status"] = df_res["status"].astype(str).str.strip()
-                    df_res["status"] = df_res["status"].replace({
+                    
+                    # Mappa di sostituzione per correggere refusi di trasmissione e caratteri corrotti
+                    corrections = {
                         "eset (Disconnesso)": "Reset (Disconnesso)",
                         "eset": "Reset (Disconnesso)",
-                        "Reset(Disconnesso)": "Reset (Disconnesso)"
-                    })
+                        "Reset(Disconnesso)": "Reset (Disconnesso)",
+                        "11I5(5m-7m)": "ALLARME (5m-7m)",
+                        "11I5": "ALLARME (5m-7m)",
+                        "ALLARME": "ALLARME (5m-7m)"
+                    }
+                    df_res["status"] = df_res["status"].replace(corrections)
+                    
+                    # Regex di sicurezza: se la stringa contiene "5m-7m" o caratteri corrotti simili, imposta ALLARME
+                    df_res.loc[df_res["status"].str.contains(r"5m-7m", case=False, na=False), "status"] = "ALLARME (5m-7m)"
+                    df_res.loc[df_res["status"].str.contains(r"eset", case=False, na=False), "status"] = "Reset (Disconnesso)"
+
                 return df_res
             elif isinstance(data, dict):
                 return pd.DataFrame([data])
