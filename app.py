@@ -2,21 +2,23 @@ import streamlit as st
 import pandas as pd
 import requests
 import plotly.express as px
-import time
+from streamlit_autorefresh import st_autorefresh
 
-# 1. Deve SEMPRE essere la PRIMA istruzione Streamlit dello script
+# 1. Deve SEMPRE essere la PRIMA istruzione Streamlit
 st.set_page_config(page_title="Monitoraggio BLE ESP32 - Advanced", layout="wide")
 
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyxdcInWY2bY0aJEnHzmxamgQ6qo3I_CnI4quqypDoMrTOMoYuL16pQyVy8JsExb93K/exec"
 
-st.title("🛡️ Dashboard Monitoraggio & Analytics BLE")
-
-# -------------------------------------------------------------------------
-# CONTROLLO AUTO-REFRESH SULLA SIDEBAR
-# -------------------------------------------------------------------------
+# 2. CONTROLLO AUTO-REFRESH SULLA SIDEBAR (Nativo, non bloccante)
 st.sidebar.title("⚙️ Impostazioni Dashboard")
 auto_refresh = st.sidebar.checkbox("Attiva Auto-Refresh Real-Time", value=True)
-refresh_rate = st.sidebar.slider("Intervallo di aggiornamento (sec):", 2, 20, 5)
+refresh_rate_sec = st.sidebar.slider("Intervallo di aggiornamento (sec):", 2, 20, 5)
+
+if auto_refresh:
+    # Aggiorna lo stato ogni X secondi senza bloccare l'app
+    st_autorefresh(interval=refresh_rate_sec * 1000, key="ble_dashboard_refresh")
+
+st.title("🛡️ Dashboard Monitoraggio & Analytics BLE")
 
 # -------------------------------------------------------------------------
 # WHITELIST DISPOSITIVI
@@ -32,7 +34,7 @@ with st.expander("📋 Dispositivi Autorizzati (Whitelist)", expanded=False):
 # -------------------------------------------------------------------------
 # FUNZIONE RECUPERO DATI
 # -------------------------------------------------------------------------
-@st.cache_data(ttl=2) # TTL basso per consentire aggiornamenti rapidi
+@st.cache_data(ttl=2)
 def get_historical_data():
     try:
         headers = {"Accept": "application/json"}
@@ -125,10 +127,7 @@ if not df.empty and len(df) > 1:
     df_filtered = df[df["status"].isin(filtro_stato)]
     st.dataframe(df_filtered.iloc[::-1], use_container_width=True)
 
-# -------------------------------------------------------------------------
-# GESTIONE AUTO-REFRESH IN LOOP
-# -------------------------------------------------------------------------
-if auto_refresh:
-    time.sleep(refresh_rate)
+# Pulsante di Aggiornamento Manuale
+if st.sidebar.button("🔄 Aggiorna Ora"):
     st.cache_data.clear()
     st.rerun()
