@@ -9,17 +9,55 @@ st.set_page_config(page_title="Monitoraggio BLE ESP32 - Advanced", layout="wide"
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyxdcInWY2bY0aJEnHzmxamgQ6qo3I_CnI4quqypDoMrTOMoYuL16pQyVy8JsExb93K/exec"
 
 # -------------------------------------------------------------------------
-# SIDEBAR - CONFIGURAZIONE & FILTRI
+# SIDEBAR - FILTRI TEMPORALI E ORARI
 # -------------------------------------------------------------------------
 st.sidebar.title("⚙️ Impostazioni Dashboard")
 auto_refresh = st.sidebar.checkbox("Attiva Auto-Refresh Real-Time", value=True)
 refresh_interval = st.sidebar.slider("Intervallo di aggiornamento (sec):", 3, 20, 5)
 
 st.sidebar.divider()
-st.sidebar.subheader("🔍 Filtro Storico Dati")
-max_records = st.sidebar.slider("Numero di ultimi eventi da analizzare:", 10, 200, 50)
+st.sidebar.subheader("🕒 Filtro Fascia Oraria")
 
-st.title("🛡️ Dashboard Monitoraggio & Analytics BLE")
+# Selettore per attivare il filtro notte (22:00 - 07:00)
+filtro_notte = st.sidebar.checkbox("🌙 Solo fascia notturna (22:00 - 07:00)", value=False)
+
+# -------------------------------------------------------------------------
+# FUNZIONE RECUPERO E ELABORAZIONE DATI
+# -------------------------------------------------------------------------
+@st.cache_data(ttl=2)
+def get_historical_data():
+    try:
+        headers = {"Accept": "application/json"}
+        response = requests.get(APPS_SCRIPT_URL, headers=headers, timeout=15, allow_redirects=True)
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list) and len(data) > 0:
+                df = pd.DataFrame(data)
+                df["distance"] = pd.to_numeric(df["distance"], errors='coerce').fillna(0)
+                df["rssi"] = pd.to_numeric(df["rssi"], errors='coerce').fillna(0)
+                
+                # Conversione in Datetime per la gestione degli orari
+                df["dt"] = pd.to_datetime(df["timestamp"], format="%d/%m/%Y %H:%M:%S", errors='coerce')
+                return df
+            elif isinstance(data, dict):
+                return pd.DataFrame([data])
+    except Exception as e:
+        st.error(f"Errore caricamento dati: {e}")
+    return pd.DataFrame()
+
+df_raw = get_historical_data()
+
+# APPLICAZIONE FILTRO NOTTURNO (22:00 - 07:00)
+if not df_raw.empty and "dt" in df_raw.columns:
+    if filtro_notte:
+        # Estrae l'ora dal timestamp
+        # Mantieni i dati dove l'ora è >= 22 OPPURE l'ora è < 7
+        condizione_notte = (df_raw["dt"].dt.hour >= 22) | (df_raw["dt"].dt.hour < 7)
+        df = df_raw[condizione_notte].copy()
+    else:
+        df = df_raw.copy()
+else:
+    df = df_raw
 
 # -------------------------------------------------------------------------
 # WHITELIST DISPOSITIVI
