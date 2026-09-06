@@ -100,14 +100,29 @@ if not df.empty and len(df) > 1:
         st.plotly_chart(fig_dist, use_container_width=True)
 
     with col_chart2:
-        st.markdown("##### 🍩 Distribuzione Rilevamenti per MAC Address")
-        fig_mac = px.pie(
-            df, 
-            names="mac", 
-            title="Frequenza di scansione per Dispositivo",
-            hole=0.4
+        st.markdown("##### 🏆 Ranking MAC Address (Dal più frequente)")
+        # Calcolo frequenza MAC address ordinato dal più alto al più basso
+        mac_counts = df["mac"].value_counts().reset_index()
+        mac_counts.columns = ["MAC Address", "Conteggio"]
+
+        # Grafico a barre orizzontali ordinato
+        fig_mac = px.bar(
+            mac_counts,
+            x="Conteggio",
+            y="MAC Address",
+            orientation="h",
+            text="Conteggio",
+            color="Conteggio",
+            color_continuous_scale="Reds",
+            title="Frequenza Rilevamenti per MAC"
         )
+        # Ordina l'asse Y per mostrare il più frequente in alto
+        fig_mac.update_layout(yaxis={"categoryorder": "total ascending"})
         st.plotly_chart(fig_mac, use_container_width=True)
+
+    # Tabella Riepilogativa del Conteggio MAC
+    with st.expander("📊 Tabella Conteggio Dettagliato MAC Address", expanded=False):
+        st.dataframe(mac_counts, use_container_width=True)
 
     st.divider()
 
