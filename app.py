@@ -41,7 +41,7 @@ with st.expander("📋 Dispositivi Autorizzati (Whitelist)", expanded=False):
     st.table(pd.DataFrame(whitelist_data))
 
 # -------------------------------------------------------------------------
-# FUNZIONE RECUPERO DATI
+# FUNZIONE RECUPERO DATI CON CLEANUP STRINGHE (CORREZIONE REFUSI)
 # -------------------------------------------------------------------------
 @st.cache_data(ttl=2)
 def get_historical_data():
@@ -55,8 +55,17 @@ def get_historical_data():
                 df_res["distance"] = pd.to_numeric(df_res["distance"], errors='coerce').fillna(0)
                 df_res["rssi"] = pd.to_numeric(df_res["rssi"], errors='coerce').fillna(0)
                 
-                # Conversione Timestamp flessibile in Datetime
+                # Conversione Timestamp in Datetime
                 df_res["dt"] = pd.to_datetime(df_res["timestamp"], dayfirst=True, errors='coerce')
+                
+                # Normalizzazione e Pulizia dello Stato (correzione refusi come "eset")
+                if "status" in df_res.columns:
+                    df_res["status"] = df_res["status"].astype(str).str.strip()
+                    df_res["status"] = df_res["status"].replace({
+                        "eset (Disconnesso)": "Reset (Disconnesso)",
+                        "eset": "Reset (Disconnesso)",
+                        "Reset(Disconnesso)": "Reset (Disconnesso)"
+                    })
                 return df_res
             elif isinstance(data, dict):
                 return pd.DataFrame([data])
@@ -71,12 +80,12 @@ df_raw = get_historical_data()
 if not df_raw.empty and "dt" in df_raw.columns:
     df_filtered_time = df_raw.copy()
 
-    # 1. Filtro Orario Notturno (22:00 - 07:00)
+    # Filtro Orario Notturno (22:00 - 07:00)
     if filtro_notte:
         condizione_notte = (df_filtered_time["dt"].dt.hour >= 22) | (df_filtered_time["dt"].dt.hour < 7)
         df_filtered_time = df_filtered_time[condizione_notte]
     
-    # 2. Filtro Distanza
+    # Filtro Distanza
     if filtro_distanza == "Solo entro 7 metri":
         df_filtered_time = df_filtered_time[(df_filtered_time["distance"] > 0) & (df_filtered_time["distance"] <= 7)]
     elif filtro_distanza == "Solo oltre 7 metri":
@@ -112,6 +121,13 @@ else:
 
 st.divider()
 
+# Mappa Colori Univoca per Tutti i Grafici
+color_map = {
+    "ALLARME (5m-7m)": "#FF4B4B",       # Rosso
+    "Reset (Fuori Portata)": "#00C0F2",  # Azzurro
+    "Reset (Disconnesso)": "#7E828A"    # Grigio
+}
+
 # -------------------------------------------------------------------------
 # GRAFICI & ANALISI STORICA
 # -------------------------------------------------------------------------
@@ -125,12 +141,6 @@ if not df.empty and len(df) > 1:
         
         df_chart = df.dropna(subset=["dt"]).sort_values("dt")
         df_valid_dist = df_chart[df_chart["distance"] > 0]
-
-        color_map = {
-            "ALLARME (5m-7m)": "#FF4B4B",
-            "Reset (Fuori Portata)": "#00C0F2",
-            "Reset (Disconnesso)": "#7E828A"
-        }
 
         fig_dist = px.line(
             df_valid_dist, 
@@ -198,8 +208,9 @@ if not df.empty and len(df) > 1:
                 x="mac",
                 y="Permanenza (Minuti)",
                 color="Ultimo_Stato",
+                color_discrete_map=color_map,
                 text="Permanenza (Minuti)",
-                labels={"mac": "MAC Address", "Permanenza (Minuti)": "Tempo Totale (min)"},
+                labels={"mac": "MAC Address", "Permanenza (Minuti)": "Tempo Totale (min)", "Ultimo_Stato": "Ultimo Stato"},
                 title="Tempo Totale nel Raggio d'Azione"
             )
             fig_perm.update_traces(texttemplate='%{text} min', textposition='outside')
