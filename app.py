@@ -88,7 +88,7 @@ def get_historical_data():
 # 1. Recupero dati da Google Sheets
 df_raw = get_historical_data()
 
-# 2. Applicazione Filtri (Notte + Distanza)
+# 2. Applicazione Filtri Generali (Notte + Distanza)
 if not df_raw.empty and "dt" in df_raw.columns:
     df_filtered_time = df_raw.copy()
 
@@ -97,7 +97,7 @@ if not df_raw.empty and "dt" in df_raw.columns:
         condizione_notte = (df_filtered_time["dt"].dt.hour >= 22) | (df_filtered_time["dt"].dt.hour < 7)
         df_filtered_time = df_filtered_time[condizione_notte]
     
-    # Filtro Distanza
+    # Filtro Distanza Generale
     if filtro_distanza == "Solo entro 7 metri":
         df_filtered_time = df_filtered_time[(df_filtered_time["distance"] > 0) & (df_filtered_time["distance"] <= 7)]
     elif filtro_distanza == "Solo oltre 7 metri":
@@ -141,7 +141,7 @@ else:
 st.divider()
 
 # -------------------------------------------------------------------------
-# CALCOLO PERMANENZA ED ANOMALY DETECTION (LOGICA INVERSA)
+# CALCOLO PERMANENZA ED ANOMALY DETECTION
 # -------------------------------------------------------------------------
 permanenza = pd.DataFrame()
 if not df.empty and len(df) > 1:
@@ -164,10 +164,8 @@ if not df.empty and len(df) > 1:
             minuti = row["Permanenza (Minuti)"]
             conteggio = row["Rilevazioni_Totali"]
             
-            # Dispositivo stazionario/noto: presente per molto tempo o con centinaia di pacchetti
             if minuti >= 60 or conteggio >= 30:
                 return "🏠 Abituale / Stazionario"
-            # Breve presenza (< 15 min) con pochi pacchetti -> Possibile Passante o Intruso
             elif minuti <= 15:
                 return "🚨 SOSPETTO (Nuovo / Breve Stazionamento)"
             else:
@@ -178,7 +176,6 @@ if not df.empty and len(df) > 1:
         permanenza["Primo Avvistamento"] = permanenza["Primo_Avvistamento"].dt.strftime("%d/%m %H:%M:%S")
         permanenza["Ultimo Avvistamento"] = permanenza["Ultimo_Avvistamento"].dt.strftime("%d/%m %H:%M:%S")
 
-        # Filtro opzionale per mostrare solo dispositivi sospetti
         if solo_sospetti:
             mac_sospetti = permanenza[permanenza["Profilo Comportamento"].str.contains("SOSPETTO|Occasionale")]["mac"].tolist()
             df = df[df["mac"].isin(mac_sospetti)]
@@ -257,8 +254,15 @@ if not df.empty and len(df) > 1:
 
         with col_perm2:
             st.markdown("##### 🔍 Profilo di Rischio Dispositivi")
+            
+            # FILTRAGGIO SPECIFICO PER LA TABELLA PROFILO DI RISCHIO
+            permanenza_rischio = permanenza.copy()
+            if filtro_notte:
+                # In modalità notturna isola solo i dispositivi con distanza media oltre 7 metri
+                permanenza_rischio = permanenza_rischio[permanenza_rischio["Distanza_Media"] > 7]
+
             st.dataframe(
-                permanenza[[
+                permanenza_rischio[[
                     "mac", 
                     "Profilo Comportamento",
                     "Permanenza (Minuti)", 
