@@ -161,6 +161,68 @@ if not df.empty and len(df) > 1:
     st.divider()
 
     # -------------------------------------------------------------------------
+    # CALCOLO TEMPI DI PERMANENZA (DWELL TIME)
+    # -------------------------------------------------------------------------
+    st.subheader("⏱️ Tempi di Permanenza Dispositivi")
+
+    # Assicuriamo che i timestamp siano in formato datetime per i calcoli matematici
+    df_calc = df.copy()
+    df_calc["dt"] = pd.to_datetime(df_calc["timestamp"], format="%d/%m/%Y %H:%M:%S", errors='coerce')
+    df_calc = df_calc.dropna(subset=["dt"]).sort_values("dt")
+
+    if not df_calc.empty:
+        # Raggruppamento per MAC Address per calcolare inizio, fine e durata totale
+        permanenza = df_calc.groupby("mac").agg(
+            Primo_Avvistamento=("dt", "min"),
+            Ultimo_Avvistamento=("dt", "max"),
+            Rilevazioni_Totali=("status", "count"),
+            Distanza_Media=("distance", "mean"),
+            Ultimo_Stato=("status", "last")
+        ).reset_index()
+
+        # Calcolo durata in minuti e secondi
+        permanenza["Durata_Delta"] = permanenza["Ultimo_Avvistamento"] - permanenza["Primo_Avvistamento"]
+        permanenza["Permanenza (Minuti)"] = (permanenza["Durata_Delta"].dt.total_seconds() / 60).round(1)
+        permanenza["Distanza_Media"] = permanenza["Distanza_Media"].round(2)
+
+        # Formattazione per la visualizzazione
+        permanenza["Primo Avvistamento"] = permanenza["Primo_Avvistamento"].dt.strftime("%d/%m %H:%M:%S")
+        permanenza["Ultimo Avvistamento"] = permanenza["Ultimo_Avvistamento"].dt.strftime("%d/%m %H:%M:%S")
+
+        col_perm1, col_perm2 = st.columns([2, 1])
+
+        with col_perm1:
+            st.markdown("##### ⏳ Durata Permanenza per Dispositivo (Minuti)")
+            fig_perm = px.bar(
+                permanenza.sort_values("Permanenza (Minuti)", ascending=False),
+                x="mac",
+                y="Permanenza (Minuti)",
+                color="Ultimo_Stato",
+                text="Permanenza (Minuti)",
+                labels={"mac": "MAC Address", "Permanenza (Minuti)": "Tempo Totale (min)"},
+                title="Tempo Totale di Permanenza nel Raggio d'Azione"
+            )
+            fig_perm.update_traces(texttemplate='%{text} min', textposition='outside')
+            st.plotly_chart(fig_perm, use_container_width=True)
+
+        with col_perm2:
+            st.markdown("##### 📌 Dettagli Permanenza")
+            st.dataframe(
+                permanenza[[
+                    "mac", 
+                    "Permanenza (Minuti)", 
+                    "Distanza_Media", 
+                    "Primo Avvistamento", 
+                    "Ultimo Avvistamento"
+                ]].rename(columns={
+                    "mac": "MAC Address", 
+                    "Distanza_Media": "Dist. Media (m)"
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+
+    # -------------------------------------------------------------------------
     # TABELLA EVENTI & ESPORTAZIONE DATI
     # -------------------------------------------------------------------------
     st.subheader("📜 Registro Ultimi Eventi")
