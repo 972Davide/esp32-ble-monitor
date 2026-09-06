@@ -2,16 +2,21 @@ import streamlit as st
 import pandas as pd
 import requests
 import plotly.express as px
-from streamlit_autorun import autorun
+import time
 
-# Aggiorna automaticamente la pagina ogni 5000 millisecondi (5 secondi)
-autorun(interval=5000, key="ble_auto_refresh")
-
+# 1. Deve SEMPRE essere la PRIMA istruzione Streamlit dello script
 st.set_page_config(page_title="Monitoraggio BLE ESP32 - Advanced", layout="wide")
 
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyxdcInWY2bY0aJEnHzmxamgQ6qo3I_CnI4quqypDoMrTOMoYuL16pQyVy8JsExb93K/exec"
 
 st.title("🛡️ Dashboard Monitoraggio & Analytics BLE")
+
+# -------------------------------------------------------------------------
+# CONTROLLO AUTO-REFRESH SULLA SIDEBAR
+# -------------------------------------------------------------------------
+st.sidebar.title("⚙️ Impostazioni Dashboard")
+auto_refresh = st.sidebar.checkbox("Attiva Auto-Refresh Real-Time", value=True)
+refresh_rate = st.sidebar.slider("Intervallo di aggiornamento (sec):", 2, 20, 5)
 
 # -------------------------------------------------------------------------
 # WHITELIST DISPOSITIVI
@@ -25,13 +30,12 @@ with st.expander("📋 Dispositivi Autorizzati (Whitelist)", expanded=False):
     st.table(pd.DataFrame(whitelist_data))
 
 # -------------------------------------------------------------------------
-# FUNZIONE RECUPERO DATI (Con timeout esteso a 15s)
+# FUNZIONE RECUPERO DATI
 # -------------------------------------------------------------------------
-@st.cache_data(ttl=5) # Mantiene la cache per 5 secondi per velocizzare il caricamento
+@st.cache_data(ttl=2) # TTL basso per consentire aggiornamenti rapidi
 def get_historical_data():
     try:
         headers = {"Accept": "application/json"}
-        # Timeout aumentato a 15 secondi per evitare l'errore di Read Timeout
         response = requests.get(APPS_SCRIPT_URL, headers=headers, timeout=15, allow_redirects=True)
         if response.status_code == 200:
             data = response.json()
@@ -121,7 +125,10 @@ if not df.empty and len(df) > 1:
     df_filtered = df[df["status"].isin(filtro_stato)]
     st.dataframe(df_filtered.iloc[::-1], use_container_width=True)
 
-# Pulsante di Aggiornamento
-if st.button("🔄 Aggiorna Dashboard"):
+# -------------------------------------------------------------------------
+# GESTIONE AUTO-REFRESH IN LOOP
+# -------------------------------------------------------------------------
+if auto_refresh:
+    time.sleep(refresh_rate)
     st.cache_data.clear()
     st.rerun()
