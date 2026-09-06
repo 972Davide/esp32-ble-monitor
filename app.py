@@ -2,21 +2,19 @@ import streamlit as st
 import pandas as pd
 import requests
 import plotly.express as px
-from streamlit_autorefresh import st_autorefresh
+import time
 
-# 1. Deve SEMPRE essere la PRIMA istruzione Streamlit
+# Must be the first Streamlit command
 st.set_page_config(page_title="Monitoraggio BLE ESP32 - Advanced", layout="wide")
 
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyxdcInWY2bY0aJEnHzmxamgQ6qo3I_CnI4quqypDoMrTOMoYuL16pQyVy8JsExb93K/exec"
 
-# 2. CONTROLLO AUTO-REFRESH SULLA SIDEBAR (Nativo, non bloccante)
+# -------------------------------------------------------------------------
+# SIDEBAR - AUTO REFRESH CONFIGURATION
+# -------------------------------------------------------------------------
 st.sidebar.title("⚙️ Impostazioni Dashboard")
 auto_refresh = st.sidebar.checkbox("Attiva Auto-Refresh Real-Time", value=True)
-refresh_rate_sec = st.sidebar.slider("Intervallo di aggiornamento (sec):", 2, 20, 5)
-
-if auto_refresh:
-    # Aggiorna lo stato ogni X secondi senza bloccare l'app
-    st_autorefresh(interval=refresh_rate_sec * 1000, key="ble_dashboard_refresh")
+refresh_interval = st.sidebar.slider("Intervallo di aggiornamento (sec):", 3, 20, 5)
 
 st.title("🛡️ Dashboard Monitoraggio & Analytics BLE")
 
@@ -127,7 +125,10 @@ if not df.empty and len(df) > 1:
     df_filtered = df[df["status"].isin(filtro_stato)]
     st.dataframe(df_filtered.iloc[::-1], use_container_width=True)
 
-# Pulsante di Aggiornamento Manuale
-if st.sidebar.button("🔄 Aggiorna Ora"):
+# -------------------------------------------------------------------------
+# TIMER AUTO-REFRESH NATIVO
+# -------------------------------------------------------------------------
+if auto_refresh:
+    time.sleep(refresh_interval)
     st.cache_data.clear()
     st.rerun()
