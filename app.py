@@ -4,60 +4,24 @@ import requests
 import plotly.express as px
 import time
 
+# 1. Configurazione della pagina (deve essere la prima istruzione Streamlit)
 st.set_page_config(page_title="Monitoraggio BLE ESP32 - Advanced", layout="wide")
 
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyxdcInWY2bY0aJEnHzmxamgQ6qo3I_CnI4quqypDoMrTOMoYuL16pQyVy8JsExb93K/exec"
 
 # -------------------------------------------------------------------------
-# SIDEBAR - FILTRI TEMPORALI E ORARI
+# SIDEBAR - CONFIGURAZIONI E FILTRI
 # -------------------------------------------------------------------------
 st.sidebar.title("⚙️ Impostazioni Dashboard")
 auto_refresh = st.sidebar.checkbox("Attiva Auto-Refresh Real-Time", value=True)
 refresh_interval = st.sidebar.slider("Intervallo di aggiornamento (sec):", 3, 20, 5)
 
 st.sidebar.divider()
-st.sidebar.subheader("🕒 Filtro Fascia Oraria")
-
-# Selettore per attivare il filtro notte (22:00 - 07:00)
+st.sidebar.subheader("🔍 Filtri Dati")
 filtro_notte = st.sidebar.checkbox("🌙 Solo fascia notturna (22:00 - 07:00)", value=False)
+max_records = st.sidebar.slider("Numero massimo di eventi da analizzare:", 10, 500, 100)
 
-# -------------------------------------------------------------------------
-# FUNZIONE RECUPERO E ELABORAZIONE DATI
-# -------------------------------------------------------------------------
-@st.cache_data(ttl=2)
-def get_historical_data():
-    try:
-        headers = {"Accept": "application/json"}
-        response = requests.get(APPS_SCRIPT_URL, headers=headers, timeout=15, allow_redirects=True)
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, list) and len(data) > 0:
-                df = pd.DataFrame(data)
-                df["distance"] = pd.to_numeric(df["distance"], errors='coerce').fillna(0)
-                df["rssi"] = pd.to_numeric(df["rssi"], errors='coerce').fillna(0)
-                
-                # Conversione in Datetime per la gestione degli orari
-                df["dt"] = pd.to_datetime(df["timestamp"], format="%d/%m/%Y %H:%M:%S", errors='coerce')
-                return df
-            elif isinstance(data, dict):
-                return pd.DataFrame([data])
-    except Exception as e:
-        st.error(f"Errore caricamento dati: {e}")
-    return pd.DataFrame()
-
-df_raw = get_historical_data()
-
-# APPLICAZIONE FILTRO NOTTURNO (22:00 - 07:00)
-if not df_raw.empty and "dt" in df_raw.columns:
-    if filtro_notte:
-        # Estrae l'ora dal timestamp
-        # Mantieni i dati dove l'ora è >= 22 OPPURE l'ora è < 7
-        condizione_notte = (df_raw["dt"].dt.hour >= 22) | (df_raw["dt"].dt.hour < 7)
-        df = df_raw[condizione_notte].copy()
-    else:
-        df = df_raw.copy()
-else:
-    df = df_raw
+st.title("🛡️ Dashboard Monitoraggio & Analytics BLE")
 
 # -------------------------------------------------------------------------
 # WHITELIST DISPOSITIVI
@@ -81,10 +45,13 @@ def get_historical_data():
         if response.status_code == 200:
             data = response.json()
             if isinstance(data, list) and len(data) > 0:
-                df = pd.DataFrame(data)
-                df["distance"] = pd.to_numeric(df["distance"], errors='coerce').fillna(0)
-                df["rssi"] = pd.to_numeric(df["rssi"], errors='coerce').fillna(0)
-                return df
+                df_res = pd.DataFrame(data)
+                df_res["distance"] = pd.to_numeric(df_res["distance"], errors='coerce').fillna(0)
+                df_res["rssi"] = pd.to_numeric(df_res["rssi"], errors='coerce').fillna(0)
+                
+                # Conversione Timestamp in Datetime reale
+                df_res["dt"] = pd.to_datetime(df_res["timestamp"], format="%d/%m/%Y %H:%M:%S", errors='coerce')
+                return df_res
             elif isinstance(data, dict):
                 return pd.DataFrame([data])
     except Exception as e:
@@ -93,8 +60,18 @@ def get_historical_data():
 
 df_raw = get_historical_data()
 
-# Applica il limite massimo di record impostato nella sidebar
-df = df_raw.tail(max_records) if not df_raw.empty else df_raw
+# Applicazione Filtro Orario Notturno (22:00 - 07:00)
+if not df_raw.empty and "dt" in df_raw.columns:
+    if filtro_notte:
+        condizione_notte = (df_raw["dt"].dt.hour >= 22) | (df_raw["dt"].dt.hour < 7)
+        df_filtered_time = df_raw[condizione_notte].copy()
+    else:
+        df_filtered_time = df_raw.copy()
+    
+    # Limita ai record scelti dall'utente
+    df = df_filtered_time.tail(max_records)
+else:
+    df = df_raw
 
 # -------------------------------------------------------------------------
 # METRICHE ISTANTANEE (ULTIMO EVENTO)
@@ -118,7 +95,7 @@ if not df.empty:
     
     st.caption(f"Ultima sincronizzazione: {latest.get('timestamp', 'N/A')}")
 else:
-    st.warning("Nessun dato disponibile da Google Sheets.")
+    st.warning("Nessun dato disponibile con i filtri selezionati.")
 
 st.divider()
 
@@ -133,45 +110,29 @@ if not df.empty and len(df) > 1:
     with col_chart1:
         st.markdown("##### 📈 Andamento Distanza nel Tempo")
         
-        # 1. Conversione del timestamp in vero formato Datetime per ordinare l'asse X
-        df_chart = df.copy()
-        df_chart["timestamp_dt"] = pd.to_datetime(df_chart["timestamp"], format="%d/%m/%Y %H:%M:%S", errors='coerce')
-        df_chart = df_chart.dropna(subset=["timestamp_dt"]).sort_values("timestamp_dt")
-
-        # 2. Escludi o gestisci i valori 0 m (Disconnessioni) per non falsare il grafico delle distanze
+        # Filtro per ordinare temporalmente l'asse X ed escludere le disconnessioni 0m
+        df_chart = df.dropna(subset=["dt"]).sort_values("dt")
         df_valid_dist = df_chart[df_chart["distance"] > 0]
 
-        # 3. Mappa Colori Personalizzata per Stato
         color_map = {
-            "ALLARME (5m-7m)": "#FF4B4B",       # Rosso
-            "Reset (Fuori Portata)": "#00C0F2",  # Azzurro
-            "Reset (Disconnesso)": "#7E828A"    # Grigio
+            "ALLARME (5m-7m)": "#FF4B4B",
+            "Reset (Fuori Portata)": "#00C0F2",
+            "Reset (Disconnesso)": "#7E828A"
         }
 
-        # 4. Creazione Grafico Plotly Ottimizzato
         fig_dist = px.line(
             df_valid_dist, 
-            x="timestamp_dt", 
+            x="dt", 
             y="distance", 
             color="status",
             markers=True,
             color_discrete_map=color_map,
-            labels={"distance": "Distanza (m)", "timestamp_dt": "Data e Ora"},
-            title="Distanza Bersaglio nel Tempo"
+            labels={"distance": "Distanza (m)", "dt": "Data e Ora"},
+            title="Variazione Distanza Bersaglio"
         )
-
-        # 5. Formattazione Asse X e Layout
-        fig_dist.update_xaxes(
-            type='date',
-            tickformat="%d/%m %H:%M",
-            dtick="auto"
-        )
-        fig_dist.update_traces(marker=dict(size=8))
-        fig_dist.update_layout(
-            hovermode="x unified",
-            legend_title_text="Stato Evento",
-            margin=dict(l=20, r=20, t=40, b=20)
-        )
+        fig_dist.update_xaxes(type='date', tickformat="%d/%m %H:%M")
+        fig_dist.update_traces(marker=dict(size=7))
+        fig_dist.update_layout(hovermode="x unified", margin=dict(l=20, r=20, t=40, b=20))
 
         st.plotly_chart(fig_dist, use_container_width=True)
 
@@ -193,23 +154,14 @@ if not df.empty and len(df) > 1:
         fig_mac.update_layout(yaxis={"categoryorder": "total ascending"})
         st.plotly_chart(fig_mac, use_container_width=True)
 
-    with st.expander("📊 Tabella Conteggio Dettagliato MAC Address", expanded=False):
-        st.dataframe(mac_counts, use_container_width=True)
-
+    # -------------------------------------------------------------------------
+    # TEMPI DI PERMANENZA (DWELL TIME)
+    # -------------------------------------------------------------------------
     st.divider()
-
-    # -------------------------------------------------------------------------
-    # CALCOLO TEMPI DI PERMANENZA (DWELL TIME)
-    # -------------------------------------------------------------------------
     st.subheader("⏱️ Tempi di Permanenza Dispositivi")
 
-    # Assicuriamo che i timestamp siano in formato datetime per i calcoli matematici
-    df_calc = df.copy()
-    df_calc["dt"] = pd.to_datetime(df_calc["timestamp"], format="%d/%m/%Y %H:%M:%S", errors='coerce')
-    df_calc = df_calc.dropna(subset=["dt"]).sort_values("dt")
-
+    df_calc = df.dropna(subset=["dt"]).sort_values("dt")
     if not df_calc.empty:
-        # Raggruppamento per MAC Address per calcolare inizio, fine e durata totale
         permanenza = df_calc.groupby("mac").agg(
             Primo_Avvistamento=("dt", "min"),
             Ultimo_Avvistamento=("dt", "max"),
@@ -218,12 +170,10 @@ if not df.empty and len(df) > 1:
             Ultimo_Stato=("status", "last")
         ).reset_index()
 
-        # Calcolo durata in minuti e secondi
         permanenza["Durata_Delta"] = permanenza["Ultimo_Avvistamento"] - permanenza["Primo_Avvistamento"]
         permanenza["Permanenza (Minuti)"] = (permanenza["Durata_Delta"].dt.total_seconds() / 60).round(1)
         permanenza["Distanza_Media"] = permanenza["Distanza_Media"].round(2)
 
-        # Formattazione per la visualizzazione
         permanenza["Primo Avvistamento"] = permanenza["Primo_Avvistamento"].dt.strftime("%d/%m %H:%M:%S")
         permanenza["Ultimo Avvistamento"] = permanenza["Ultimo_Avvistamento"].dt.strftime("%d/%m %H:%M:%S")
 
@@ -238,7 +188,7 @@ if not df.empty and len(df) > 1:
                 color="Ultimo_Stato",
                 text="Permanenza (Minuti)",
                 labels={"mac": "MAC Address", "Permanenza (Minuti)": "Tempo Totale (min)"},
-                title="Tempo Totale di Permanenza nel Raggio d'Azione"
+                title="Tempo Totale nel Raggio d'Azione"
             )
             fig_perm.update_traces(texttemplate='%{text} min', textposition='outside')
             st.plotly_chart(fig_perm, use_container_width=True)
@@ -260,6 +210,8 @@ if not df.empty and len(df) > 1:
                 hide_index=True
             )
 
+    st.divider()
+
     # -------------------------------------------------------------------------
     # TABELLA EVENTI & ESPORTAZIONE DATI
     # -------------------------------------------------------------------------
@@ -277,8 +229,7 @@ if not df.empty and len(df) > 1:
     df_filtered = df[df["status"].isin(filtro_stato)]
     
     with col_export:
-        st.markdown("  ")
-        # Pulsante per scaricare i dati in formato CSV
+        st.markdown(" ")
         csv_data = df_filtered.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Scarica Dati (CSV)",
@@ -290,7 +241,7 @@ if not df.empty and len(df) > 1:
     st.dataframe(df_filtered.iloc[::-1], use_container_width=True)
 
 # -------------------------------------------------------------------------
-# TIMER AUTO-REFRESH NATIVO
+# AUTO-REFRESH NATIVO
 # -------------------------------------------------------------------------
 if auto_refresh:
     time.sleep(refresh_interval)
