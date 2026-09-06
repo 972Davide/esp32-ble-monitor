@@ -93,16 +93,48 @@ if not df.empty and len(df) > 1:
     col_chart1, col_chart2 = st.columns(2)
 
     with col_chart1:
-        st.markdown("##### 📈 Andamento Distanza e RSSI nel Tempo")
+        st.markdown("##### 📈 Andamento Distanza nel Tempo")
+        
+        # 1. Conversione del timestamp in vero formato Datetime per ordinare l'asse X
+        df_chart = df.copy()
+        df_chart["timestamp_dt"] = pd.to_datetime(df_chart["timestamp"], format="%d/%m/%Y %H:%M:%S", errors='coerce')
+        df_chart = df_chart.dropna(subset=["timestamp_dt"]).sort_values("timestamp_dt")
+
+        # 2. Escludi o gestisci i valori 0 m (Disconnessioni) per non falsare il grafico delle distanze
+        df_valid_dist = df_chart[df_chart["distance"] > 0]
+
+        # 3. Mappa Colori Personalizzata per Stato
+        color_map = {
+            "ALLARME (5m-7m)": "#FF4B4B",       # Rosso
+            "Reset (Fuori Portata)": "#00C0F2",  # Azzurro
+            "Reset (Disconnesso)": "#7E828A"    # Grigio
+        }
+
+        # 4. Creazione Grafico Plotly Ottimizzato
         fig_dist = px.line(
-            df, 
-            x="timestamp", 
+            df_valid_dist, 
+            x="timestamp_dt", 
             y="distance", 
             color="status",
             markers=True,
-            labels={"distance": "Distanza (m)", "timestamp": "Ora Evento"},
-            title="Variazione Distanza Bersaglio"
+            color_discrete_map=color_map,
+            labels={"distance": "Distanza (m)", "timestamp_dt": "Data e Ora"},
+            title="Distanza Bersaglio nel Tempo"
         )
+
+        # 5. Formattazione Asse X e Layout
+        fig_dist.update_xaxes(
+            type='date',
+            tickformat="%d/%m %H:%M",
+            dtick="auto"
+        )
+        fig_dist.update_traces(marker=dict(size=8))
+        fig_dist.update_layout(
+            hovermode="x unified",
+            legend_title_text="Stato Evento",
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+
         st.plotly_chart(fig_dist, use_container_width=True)
 
     with col_chart2:
