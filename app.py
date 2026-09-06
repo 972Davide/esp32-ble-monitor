@@ -2,6 +2,10 @@ import streamlit as st
 import pandas as pd
 import requests
 import plotly.express as px
+from streamlit_autorun import autorun
+
+# Aggiorna automaticamente la pagina ogni 5000 millisecondi (5 secondi)
+autorun(interval=5000, key="ble_auto_refresh")
 
 st.set_page_config(page_title="Monitoraggio BLE ESP32 - Advanced", layout="wide")
 
