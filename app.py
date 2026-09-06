@@ -19,6 +19,7 @@ refresh_interval = st.sidebar.slider("Intervallo di aggiornamento (sec):", 3, 20
 st.sidebar.divider()
 st.sidebar.subheader("🔍 Filtri Dati")
 filtro_notte = st.sidebar.checkbox("🌙 Solo fascia notturna (22:00 - 07:00)", value=False)
+solo_vicini = st.sidebar.checkbox("⚠️ Solo dispositivi entro 7 metri", value=False)
 max_records = st.sidebar.slider("Numero massimo di eventi da analizzare:", 10, 500, 100)
 
 st.title("🛡️ Dashboard Monitoraggio & Analytics BLE")
@@ -49,8 +50,8 @@ def get_historical_data():
                 df_res["distance"] = pd.to_numeric(df_res["distance"], errors='coerce').fillna(0)
                 df_res["rssi"] = pd.to_numeric(df_res["rssi"], errors='coerce').fillna(0)
                 
-                # Conversione Timestamp in Datetime reale
-                df_res["dt"] = pd.to_datetime(df_res["timestamp"], format="%d/%m/%Y %H:%M:%S", errors='coerce')
+                # Conversione Timestamp flessibile in Datetime
+                df_res["dt"] = pd.to_datetime(df_res["timestamp"], dayfirst=True, errors='coerce')
                 return df_res
             elif isinstance(data, dict):
                 return pd.DataFrame([data])
@@ -58,17 +59,25 @@ def get_historical_data():
         st.error(f"Errore caricamento dati: {e}")
     return pd.DataFrame()
 
+# 1. Recupero dati da Google Sheets
 df_raw = get_historical_data()
 
-# Applicazione Filtro Orario Notturno (22:00 - 07:00)
+# 2. Applicazione Filtri Combinati (Notte + Distanza) DOPO l'acquisizione
 if not df_raw.empty and "dt" in df_raw.columns:
+    df_filtered_time = df_raw.copy()
+
+    # Filtro 1: Fascia Notturna (22:00 - 07:00)
     if filtro_notte:
-        condizione_notte = (df_raw["dt"].dt.hour >= 22) | (df_raw["dt"].dt.hour < 7)
-        df_filtered_time = df_raw[condizione_notte].copy()
-    else:
-        df_filtered_time = df_raw.copy()
+        condizione_notte = (df_filtered_time["dt"].dt.hour >= 22) | (df_filtered_time["dt"].dt.hour < 7)
+        df_filtered_time = df_filtered_time[condizione_notte]
     
-    # Limita ai record scelti dall'utente
+    # Filtro 2: Distanza <= 7 metri
+    if solo_vicini:
+        df_filtered_time = df_filtered_time[
+            (df_filtered_time["distance"] > 0) & (df_filtered_time["distance"] <= 7)
+        ]
+
+    # Limita ai record richiesti dallo slider
     df = df_filtered_time.tail(max_records)
 else:
     df = df_raw
@@ -110,7 +119,6 @@ if not df.empty and len(df) > 1:
     with col_chart1:
         st.markdown("##### 📈 Andamento Distanza nel Tempo")
         
-        # Filtro per ordinare temporalmente l'asse X ed escludere le disconnessioni 0m
         df_chart = df.dropna(subset=["dt"]).sort_values("dt")
         df_valid_dist = df_chart[df_chart["distance"] > 0]
 
