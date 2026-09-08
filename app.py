@@ -4,7 +4,7 @@ import pandas as pd
 import requests
 
 # Inserisci qui l'URL della tua Web App Google Apps Script
-APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbylTrYQm6X2SgvaYPCOK2qTVmzYzc_2jTyesefdGfZNvIJNeccDXx5hA-hN4iZpuUOz/exec"
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz6vMrIZZCm1m2QFxT_9Dl4m-HAtRpl-LmZaJP5kSBavTJr-Rrika9NgvcoAKQ9dsc/exec"
 
 @st.cache_data(ttl=5)  # Aggiorna i dati ogni 5 secondi
 def get_historical_data():
