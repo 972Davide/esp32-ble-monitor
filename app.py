@@ -59,7 +59,7 @@ st.markdown("### 📡 [SOC] BLE RADAR & HOUSE PERIMETER MAP")
 st.caption("TACTICAL DISPLAY // REAL-TIME SPATIAL PROXIMITY TRACKING")
 
 # ⚠️ SOSTITUISCI CON IL TUO ID SCRIPT REALE DI GOOGLE APPS SCRIPT
-URL = "https://script.google.com/macros/sAKfycbyW6iY08lTa5ET3M9nsIm-J393Tawv9K_52xE_hyYKydK69Q-j9ywlAgTcFhRYzrYGc/exec?format=json"
+URL = "https://script.google.com/macros/s/AKfycbyW6iY08lTa5ET3M9nsIm-J393Tawv9K_52xE_hyYKydK69Q-j9ywlAgTcFhRYzrYGc/exec?format=json"
 
 # --- FUNZIONE FRAGMENT PER AUTO-REFRESH NATIVO OGNI 3 SECONDI ---
 @st.fragment(run_every=3)
