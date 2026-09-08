@@ -4,7 +4,7 @@ import requests
 import numpy as np
 import plotly.graph_objects as go
 
-# 1. PAGE CONFIG
+# 1. CONFIGURAZIONE PAGINA
 st.set_page_config(
     page_title="SOC // BLE TACTICAL MAP",
     page_icon="📡",
@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 2. HACKER / CYBERPUNK CSS INJECTION
+# 2. STILE CYBERPUNK / HACKER TERMINAL (CSS)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600;700&display=swap');
@@ -54,162 +54,182 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 3. HEADER
+# 3. INTESTAZIONE TERMINALE
 st.markdown("### 📡 [SOC] BLE RADAR & HOUSE PERIMETER MAP")
 st.caption("TACTICAL DISPLAY // REAL-TIME SPATIAL PROXIMITY TRACKING")
 
+# ⚠️ SOSTITUISCI CON IL TUO ID SCRIPT REALE DI GOOGLE APPS SCRIPT
 URL = "https://script.google.com/macros/s/AKfycbyW6iY08lTa5ET3M9nsIm-J393Tawv9K_52xE_hyYKydK69Q-j9ywlAgTcFhRYzrYGc/exec?format=json"
 
 try:
-    response = requests.get(URL, timeout=8)
-    data = response.json()
+    response = requests.get(URL, timeout=10, allow_redirects=True)
+    
+    if response.status_code == 200:
+        data = response.json()
 
-    if len(data) > 0:
-        df = pd.DataFrame(data)
+        if isinstance(data, list) and len(data) > 0:
+            df = pd.DataFrame(data)
 
-        col_event = next((c for c in df.columns if 'event' in str(c).lower() or 'evento' in str(c).lower()), df.columns[1] if len(df.columns) > 1 else None)
-        col_mac = next((c for c in df.columns if 'mac' in str(c).lower()), df.columns[3] if len(df.columns) > 3 else None)
-        col_dist = next((c for c in df.columns if 'dist' in str(c).lower()), df.columns[5] if len(df.columns) > 5 else None)
-        col_name = next((c for c in df.columns if 'name' in str(c).lower() or 'nome' in str(c).lower()), df.columns[2] if len(df.columns) > 2 else None)
+            # Individuazione automatica colonne
+            col_event = next((c for c in df.columns if 'event' in str(c).lower() or 'evento' in str(c).lower()), df.columns[1] if len(df.columns) > 1 else None)
+            col_mac = next((c for c in df.columns if 'mac' in str(c).lower()), df.columns[3] if len(df.columns) > 3 else None)
+            col_dist = next((c for c in df.columns if 'dist' in str(c).lower()), df.columns[5] if len(df.columns) > 5 else None)
+            col_name = next((c for c in df.columns if 'name' in str(c).lower() or 'nome' in str(c).lower()), df.columns[2] if len(df.columns) > 2 else None)
 
-        last_event = str(df[col_event].iloc[0]) if col_event and not df.empty else "NO_DATA"
-        is_alarm = "ENTRATO" in last_event.upper()
+            last_event = str(df[col_event].iloc[0]) if col_event and not df.empty else "NO_DATA"
+            is_alarm = "ENTRATO" in last_event.upper()
 
-        if is_alarm:
-            st.markdown(f'<div class="status-alert status-danger">⚠️ INTRUDER BREACH DETECTED // STATE: {last_event}</div>', unsafe_allow_html=True)
-        else:
-            st.markdown(f'<div class="status-alert status-safe">🛡️ PERIMETER SECURE // STATE: {last_event}</div>', unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        col_map, col_stats = st.columns([2, 1])
-
-        with col_map:
-            st.markdown("#### 📐 PLANIMETRIA CASA & PERIMETRO BLE")
-
-            fig = go.Figure()
-
-            # --- 1. REVISIONATO: DISEGNO FABBRICATO / PLANIMETRIA CASA ---
-            # Rettangolo della Casa (Lunghezza X = 12m, Larghezza Y = 7m)
-            house_x = [-6, 6, 6, -6, -6]
-            house_y = [-3.5, -3.5, 3.5, 3.5, -3.5]
-
-            # Superficie interna della casa con riempimento semi-trasparente
-            fig.add_trace(go.Scatter(
-                x=house_x, y=house_y,
-                fill="toself",
-                fillcolor="rgba(0, 240, 255, 0.08)",
-                line=dict(color='#00f0ff', width=3),
-                name='Struttura Casa',
-                hoverinfo='text',
-                text='🏠 AREA EDIFICIO / CASA'
-            ))
-
-            # Etichette orientamento perimetrale della casa
-            fig.add_annotation(x=0, y=3.8, text="<b>PARETE NORD</b>", showarrow=False, font=dict(color="#00f0ff", size=10))
-            fig.add_annotation(x=0, y=-3.8, text="<b>PARETE SUD</b>", showarrow=False, font=dict(color="#00f0ff", size=10))
-            fig.add_annotation(x=-6.5, y=0, text="<b>PARETE OVEST</b>", showarrow=False, font=dict(color="#00f0ff", size=10), textangle=-90)
-            fig.add_annotation(x=6.5, y=0, text="<b>PARETE EST</b>", showarrow=False, font=dict(color="#00f0ff", size=10), textangle=90)
-
-            # --- 2. ESP32 GATEWAY ---
-            fig.add_trace(go.Scatter(
-                x=[0], y=[0],
-                mode='markers+text',
-                marker=dict(size=14, color='#00ff66', symbol='hexagram-open', line=dict(width=2, color='#00ff66')),
-                text=['ESP32 GATEWAY'],
-                textposition='top center',
-                textfont=dict(color='#00ff66', family='Fira Code', size=11),
-                name='Gateway'
-            ))
-
-            # --- 3. CERCHI DI COPERTURA BLE (Soglie 5m, 7m, 15m) ---
-            angles = np.linspace(0, 2*np.pi, 100)
-            for r in [5, 7, 15]:
-                fig.add_trace(go.Scatter(
-                    x=r*np.cos(angles), y=r*np.sin(angles),
-                    mode='lines',
-                    line=dict(color='rgba(0, 240, 255, 0.15)', width=1, dash='dot'),
-                    showlegend=False, hoverinfo='none'
-                ))
-
-            # --- 4. DISPOSITIVI BLE RILEVATI ---
-            if col_mac and col_dist:
-                df['Distanza_Num'] = pd.to_numeric(df[col_dist], errors='coerce').fillna(0)
-                recent_devices = df.drop_duplicates(subset=[col_mac]).head(8)
-
-                np.random.seed(42)
-                angles_assigned = np.linspace(0.3, 2*np.pi - 0.3, len(recent_devices))
-
-                target_x, target_y, target_texts, colors = [], [], [], []
-
-                for idx, (_, row) in enumerate(recent_devices.iterrows()):
-                    dist = row['Distanza_Num']
-                    if dist <= 0: dist = 2.0
-                    
-                    angle = angles_assigned[idx]
-                    x = dist * np.cos(angle)
-                    y = dist * np.sin(angle)
-
-                    mac_str = str(row[col_mac])
-                    evt_str = str(row[col_event]) if col_event else ""
-
-                    target_x.append(x)
-                    target_y.append(y)
-                    target_texts.append(f"MAC: {mac_str}<br>Dist: {dist:.2f}m<br>Evento: {evt_str}")
-
-                    if "ENTRATO" in evt_str.upper():
-                        colors.append('#ff0055')
-                    elif "PRESENTE" in evt_str.upper():
-                        colors.append('#ffcc00')
-                    else:
-                        colors.append('#00ff66')
-
-                fig.add_trace(go.Scatter(
-                    x=target_x, y=target_y,
-                    mode='markers+text',
-                    marker=dict(size=16, color=colors, line=dict(width=2, color='#ffffff')),
-                    text=[f"  {row[col_mac]}" for _, row in recent_devices.iterrows()],
-                    textposition='top right',
-                    textfont=dict(color='#ffffff', family='Fira Code', size=10),
-                    hoverinfo='text',
-                    hovertext=target_texts,
-                    name='Dispositivi BLE'
-                ))
-
-            fig.update_layout(
-                paper_bgcolor='#080c10',
-                plot_bgcolor='#080c10',
-                margin=dict(l=20, r=20, t=30, b=20),
-                xaxis=dict(
-                    range=[-18, 18], showgrid=False, zeroline=False, showticklabels=False,
-                    title=dict(text="<b>◄ OVEST                     EST ►</b>", font=dict(color='#00f0ff', size=12))
-                ),
-                yaxis=dict(
-                    range=[-18, 18], showgrid=False, zeroline=False, showticklabels=False,
-                    title=dict(text="<b>◄ SUD                     NORD ►</b>", font=dict(color='#00f0ff', size=12))
-                ),
-                showlegend=False,
-                height=550
-            )
-
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col_stats:
-            st.markdown("#### 📊 TELEMETRY STATS")
-            st.metric(label="DEVICES IN RANGE", value=f"{len(recent_devices):02d}" if 'recent_devices' in locals() else "0")
-            
-            total_alarms = len(df[df[col_event].astype(str).str.contains('ENTRATO', na=False, case=False)]) if col_event else 0
-            st.metric(label="TOTAL BREACHES", value=f"{total_alarms:02d}")
+            # BANNER ALERT STATO
+            if is_alarm:
+                st.markdown(f'<div class="status-alert status-danger">⚠️ INTRUDER BREACH DETECTED // STATE: {last_event}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="status-alert status-safe">🛡️ PERIMETER SECURE // STATE: {last_event}</div>', unsafe_allow_html=True)
 
             st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("#### 📑 ACTIVE TARGETS LOG")
-            
-            if 'recent_devices' in locals():
-                display_cols = [c for c in [col_mac, col_event, col_dist] if c is not None]
-                st.dataframe(recent_devices[display_cols], hide_index=True, use_container_width=True)
 
+            col_map, col_stats = st.columns([2, 1])
+
+            # --- MAPPA PLANIMETRICA SATELLITARE (PLOTLY) ---
+            with col_map:
+                st.markdown("#### 📐 PLANIMETRIA CASA & PERIMETRO BLE")
+
+                fig = go.Figure()
+
+                # 1. Sagoma Edificio Principale (10m x 8m)
+                house_x = [-5, 5, 5, -5, -5]
+                house_y = [-6, -6, 6, 6, -6]
+
+                fig.add_trace(go.Scatter(
+                    x=house_x, y=house_y,
+                    fill="toself",
+                    fillcolor="rgba(0, 240, 255, 0.12)",
+                    line=dict(color='#00f0ff', width=3),
+                    name='Abitazione',
+                    hoverinfo='text',
+                    text='🏠 EDIFICIO PRINCIPALE'
+                ))
+
+                # 2. Delimitazione Strada sul lato EST (destra)
+                fig.add_trace(go.Scatter(
+                    x=[9, 9], y=[-15, 15],
+                    mode='lines',
+                    line=dict(color='rgba(255, 255, 255, 0.3)', width=4, dash='dash'),
+                    name='Strada',
+                    hoverinfo='text',
+                    text='🛣️ STRADA / VIA PUBBLICA (EST)'
+                ))
+
+                # 3. Etichette Cardinali e Punti di Riferimento
+                fig.add_annotation(x=0, y=6.8, text="<b>NORD (Retro)</b>", showarrow=False, font=dict(color="#00f0ff", size=10))
+                fig.add_annotation(x=0, y=-6.8, text="<b>SUD (Casa dei Gelsi)</b>", showarrow=False, font=dict(color="#00f0ff", size=10))
+                fig.add_annotation(x=-5.8, y=0, text="<b>OVEST (Giardino)</b>", showarrow=False, font=dict(color="#00f0ff", size=10), textangle=-90)
+                fig.add_annotation(x=5.8, y=0, text="<b>EST (Ingresso / Strada)</b>", showarrow=False, font=dict(color="#00f0ff", size=10), textangle=90)
+
+                # 4. Posizione Centralina ESP32 (Centro Casa)
+                fig.add_trace(go.Scatter(
+                    x=[0], y=[0],
+                    mode='markers+text',
+                    marker=dict(size=14, color='#00ff66', symbol='hexagram-open', line=dict(width=2, color='#00ff66')),
+                    text=['ESP32 GATEWAY'],
+                    textposition='top center',
+                    textfont=dict(color='#00ff66', family='Fira Code', size=11),
+                    name='Gateway'
+                ))
+
+                # 5. Anelli Concentrici Radar (Raggi di Copertura BLE: 5m, 8m, 15m)
+                angles = np.linspace(0, 2*np.pi, 100)
+                for r in [5, 8, 15]:
+                    fig.add_trace(go.Scatter(
+                        x=r*np.cos(angles), y=r*np.sin(angles),
+                        mode='lines',
+                        line=dict(color='rgba(0, 240, 255, 0.15)', width=1, dash='dot'),
+                        showlegend=False, hoverinfo='none'
+                    ))
+
+                # 6. Mappatura Dispositivi BLE
+                if col_mac and col_dist:
+                    df['Distanza_Num'] = pd.to_numeric(df[col_dist], errors='coerce').fillna(0)
+                    recent_devices = df.drop_duplicates(subset=[col_mac]).head(8)
+
+                    np.random.seed(42)
+                    angles_assigned = np.linspace(0.3, 2*np.pi - 0.3, len(recent_devices))
+
+                    target_x, target_y, target_texts, colors = [], [], [], []
+
+                    for idx, (_, row) in enumerate(recent_devices.iterrows()):
+                        dist = row['Distanza_Num']
+                        if dist <= 0: dist = 2.0
+                        
+                        angle = angles_assigned[idx]
+                        x = dist * np.cos(angle)
+                        y = dist * np.sin(angle)
+
+                        mac_str = str(row[col_mac])
+                        evt_str = str(row[col_event]) if col_event else ""
+
+                        target_x.append(x)
+                        target_y.append(y)
+                        target_texts.append(f"MAC: {mac_str}<br>Dist: {dist:.2f}m<br>Evento: {evt_str}")
+
+                        if "ENTRATO" in evt_str.upper():
+                            colors.append('#ff0055') # Rosso Allarme
+                        elif "PRESENTE" in evt_str.upper():
+                            colors.append('#ffcc00') # Giallo Tracciato
+                        else:
+                            colors.append('#00ff66') # Verde Normale
+
+                    fig.add_trace(go.Scatter(
+                        x=target_x, y=target_y,
+                        mode='markers+text',
+                        marker=dict(size=16, color=colors, line=dict(width=2, color='#ffffff')),
+                        text=[f"  {row[col_mac]}" for _, row in recent_devices.iterrows()],
+                        textposition='top right',
+                        textfont=dict(color='#ffffff', family='Fira Code', size=10),
+                        hoverinfo='text',
+                        hovertext=target_texts,
+                        name='Dispositivi BLE'
+                    ))
+
+                # Layout Plotly Tattico
+                fig.update_layout(
+                    paper_bgcolor='#080c10',
+                    plot_bgcolor='#080c10',
+                    margin=dict(l=20, r=20, t=30, b=20),
+                    xaxis=dict(
+                        range=[-18, 18], showgrid=False, zeroline=False, showticklabels=False,
+                        title=dict(text="<b>◄ OVEST (Giardino)                   EST (Strada) ►</b>", font=dict(color='#00f0ff', size=11))
+                    ),
+                    yaxis=dict(
+                        range=[-18, 18], showgrid=False, zeroline=False, showticklabels=False,
+                        title=dict(text="<b>◄ SUD (Gelsi)                   NORD (Retro) ►</b>", font=dict(color='#00f0ff', size=11))
+                    ),
+                    showlegend=False,
+                    height=580
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+            # --- PANNELLO METRICHE E LOG DATING ---
+            with col_stats:
+                st.markdown("#### 📊 TELEMETRY STATS")
+                st.metric(label="DEVICES IN RANGE", value=f"{len(recent_devices):02d}" if 'recent_devices' in locals() else "0")
+                
+                total_alarms = len(df[df[col_event].astype(str).str.contains('ENTRATO', na=False, case=False)]) if col_event else 0
+                st.metric(label="TOTAL BREACHES", value=f"{total_alarms:02d}")
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("#### 📑 ACTIVE TARGETS LOG")
+                
+                if 'recent_devices' in locals():
+                    display_cols = [c for c in [col_mac, col_event, col_dist] if c is not None]
+                    st.dataframe(recent_devices[display_cols], hide_index=True, use_container_width=True)
+
+        else:
+            st.warning("[!] Nessun dato restituito dall'endpoint Google Sheet.")
     else:
-        st.warning("[!] No records found in Google Sheet endpoint.")
+        st.error(f"[!] Errore HTTP {response.status_code}: Impossibile connettersi all'endpoint Google Apps Script.")
 
+except requests.exceptions.JSONDecodeError:
+    st.error("[!] SYSTEM ERROR: Risposta ricevuta non in formato JSON. Controlla l'URL di Apps Script (deve terminare con `?format=json`).")
 except Exception as e:
     st.error(f"[!] SYSTEM ERROR: {e}")
