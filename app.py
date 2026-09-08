@@ -1,314 +1,44 @@
+
 import streamlit as st
 import pandas as pd
 import requests
-import plotly.express as px
-import time
 
-# 1. Configurazione della pagina (deve essere la prima istruzione Streamlit)
-st.set_page_config(page_title="Monitoraggio BLE ESP32 - Advanced", layout="wide")
-
+# Inserisci qui l'URL della tua Web App Google Apps Script
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbylTrYQm6X2SgvaYPCOK2qTVmzYzc_2jTyesefdGfZNvIJNeccDXx5hA-hN4iZpuUOz/exec"
 
-# -------------------------------------------------------------------------
-# SIDEBAR - CONFIGURAZIONI E FILTRI
-# -------------------------------------------------------------------------
-st.sidebar.title("⚙️ Impostazioni Dashboard")
-auto_refresh = st.sidebar.checkbox("Attiva Auto-Refresh Real-Time", value=True)
-refresh_interval = st.sidebar.slider("Intervallo di aggiornamento (sec):", 3, 20, 5)
-
-st.sidebar.divider()
-st.sidebar.subheader("🔍 Filtri Dati")
-filtro_notte = st.sidebar.checkbox("🌙 Solo fascia notturna (22:00 - 07:00)", value=False)
-
-filtro_distanza = st.sidebar.selectbox(
-    "📏 Filtro Distanza:",
-    options=["Tutti i dispositivi", "Solo entro 7 metri", "Solo oltre 7 metri"]
-)
-
-solo_sospetti = st.sidebar.checkbox("🚨 Mostra solo Dispositivi Sospetti/Occasionali", value=False)
-
-max_records = st.sidebar.slider("Numero massimo di eventi da analizzare:", 10, 500, 100)
-
-st.title("🛡️ Dashboard Monitoraggio & Analytics BLE")
-
-# -------------------------------------------------------------------------
-# WHITELIST DISPOSITIVI
-# -------------------------------------------------------------------------
-with st.expander("📋 Dispositivi Autorizzati (Whitelist)", expanded=False):
-    whitelist_data = {
-        "Dispositivo": ["Dispositivo 1", "Dispositivo 2", "Dispositivo 3"],
-        "MAC Address": ["1c:3d:48:d6:f1:f0", "de:cd:2f:73:96:d3", "12:fc:96:71:ac:84"],
-        "Stato": ["Autorizzato", "Autorizzato", "Autorizzato"]
-    }
-    st.table(pd.DataFrame(whitelist_data))
-
-# -------------------------------------------------------------------------
-# FUNZIONE RECUPERO DATI CON PULIZIA E NORMALIZZAZIONE AVANZATA
-# -------------------------------------------------------------------------
-@st.cache_data(ttl=2)
+@st.cache_data(ttl=5)  # Aggiorna i dati ogni 5 secondi
 def get_historical_data():
     try:
-        headers = {"Accept": "application/json"}
-        response = requests.get(APPS_SCRIPT_URL, headers=headers, timeout=15, allow_redirects=True)
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, list) and len(data) > 0:
-                df_res = pd.DataFrame(data)
-                df_res["distance"] = pd.to_numeric(df_res["distance"], errors='coerce').fillna(0)
-                df_res["rssi"] = pd.to_numeric(df_res["rssi"], errors='coerce').fillna(0)
-                
-                # Conversione Timestamp in Datetime
-                df_res["dt"] = pd.to_datetime(df_res["timestamp"], dayfirst=True, errors='coerce')
-                
-                # Normalizzazione e Pulizia dello Stato (Correzione refusi hardware/trasmissione)
-                if "status" in df_res.columns:
-                    df_res["status"] = df_res["status"].astype(str).str.strip()
-                    
-                    corrections = {
-                        "eset (Disconnesso)": "Reset (Disconnesso)",
-                        "eset": "Reset (Disconnesso)",
-                        "Reset(Disconnesso)": "Reset (Disconnesso)",
-                        "11I5(5m-7m)": "ALLARME (5m-7m)",
-                        "11I5": "ALLARME (5m-7m)",
-                        "ALLARME": "ALLARME (5m-7m)"
-                    }
-                    df_res["status"] = df_res["status"].replace(corrections)
-                    
-                    # Filtri di sicurezza tramite espressioni regolari
-                    df_res.loc[df_res["status"].str.contains(r"5m-7m", case=False, na=False), "status"] = "ALLARME (5m-7m)"
-                    df_res.loc[df_res["status"].str.contains(r"eset", case=False, na=False), "status"] = "Reset (Disconnesso)"
+        # Richiede il formato JSON passando ?format=json
+        response = requests.get(
+            APPS_SCRIPT_URL, 
+            params={"format": "json"}, 
+            allow_redirects=True, 
+            timeout=10
+        )
+        
+        # Verifica che la risposta sia valida
+        response.raise_for_status()
+        
+        # Parsa i dati JSON
+        data = response.json()
+        
+        if not data or len(data) == 0:
+            return pd.DataFrame()
+            
+        df = pd.DataFrame(data)
+        return df
 
-                return df_res
-            elif isinstance(data, dict):
-                return pd.DataFrame([data])
     except Exception as e:
-        st.error(f"Errore caricamento dati: {e}")
-    return pd.DataFrame()
+        st.error(f"Errore nella lettura da Google Sheets: {e}")
+        return pd.DataFrame()
 
-# 1. Recupero dati da Google Sheets
-df_raw = get_historical_data()
+# Caricamento e visualizzazione
+st.title("🚦 Dashboard Monitoraggio & Analytics BLE")
 
-# 2. Applicazione Filtri Generali (Notte + Distanza)
-if not df_raw.empty and "dt" in df_raw.columns:
-    df_filtered_time = df_raw.copy()
-
-    # Filtro Orario Notturno (22:00 - 07:00)
-    if filtro_notte:
-        condizione_notte = (df_filtered_time["dt"].dt.hour >= 22) | (df_filtered_time["dt"].dt.hour < 7)
-        df_filtered_time = df_filtered_time[condizione_notte]
-    
-    # Filtro Distanza Generale
-    if filtro_distanza == "Solo entro 7 metri":
-        df_filtered_time = df_filtered_time[(df_filtered_time["distance"] > 0) & (df_filtered_time["distance"] <= 7)]
-    elif filtro_distanza == "Solo oltre 7 metri":
-        df_filtered_time = df_filtered_time[df_filtered_time["distance"] > 7]
-
-    df = df_filtered_time.tail(max_records)
-else:
-    df = df_raw
-
-# Mappa Colori Univoca per i Grafici
-color_map = {
-    "ALLARME (5m-7m)": "#FF4B4B",       # Rosso
-    "Reset (Fuori Portata)": "#00C0F2",  # Azzurro
-    "Reset (Disconnesso)": "#7E828A"    # Grigio
-}
-
-# -------------------------------------------------------------------------
-# METRICHE ISTANTANEE (ULTIMO EVENTO)
-# -------------------------------------------------------------------------
-st.subheader("📍 Stato Attuale in Tempo Reale")
+df = get_historical_data()
 
 if not df.empty:
-    latest = df.iloc[-1]
-    
-    col1, col2, col3, col4 = st.columns(4)
-    status_text = str(latest.get("status", "N/A"))
-    
-    if "ALLARME" in status_text.upper():
-        col1.metric("Stato Allarme", status_text, delta="⚠️ Intrusione", delta_color="inverse")
-    else:
-        col1.metric("Stato Allarme", status_text)
-
-    col2.metric("MAC Rilevato", latest.get("mac", "N/A"))
-    col3.metric("Distanza Stimata", f"{latest.get('distance', 0)} m")
-    col4.metric("RSSI", f"{latest.get('rssi', 0)} dBm")
-    
-    st.caption(f"Ultima sincronizzazione: {latest.get('timestamp', 'N/A')}")
+    st.write("### 📊 Ultimi Transiti Rilevati", df)
 else:
-    st.warning("Nessun dato disponibile con i filtri selezionati.")
-
-st.divider()
-
-# -------------------------------------------------------------------------
-# CALCOLO PERMANENZA ED ANOMALY DETECTION
-# -------------------------------------------------------------------------
-permanenza = pd.DataFrame()
-if not df.empty and len(df) > 1:
-    df_calc = df.dropna(subset=["dt"]).sort_values("dt")
-    if not df_calc.empty:
-        permanenza = df_calc.groupby("mac").agg(
-            Primo_Avvistamento=("dt", "min"),
-            Ultimo_Avvistamento=("dt", "max"),
-            Rilevazioni_Totali=("status", "count"),
-            Distanza_Media=("distance", "mean"),
-            Ultimo_Stato=("status", "last")
-        ).reset_index()
-
-        permanenza["Durata_Delta"] = permanenza["Ultimo_Avvistamento"] - permanenza["Primo_Avvistamento"]
-        permanenza["Permanenza (Minuti)"] = (permanenza["Durata_Delta"].dt.total_seconds() / 60).round(1)
-        permanenza["Distanza_Media"] = permanenza["Distanza_Media"].round(2)
-
-        # Regola di classificazione del comportamento (Anomaly Detection)
-        def classifica_comportamento(row):
-            minuti = row["Permanenza (Minuti)"]
-            conteggio = row["Rilevazioni_Totali"]
-            
-            if minuti >= 60 or conteggio >= 30:
-                return "🏠 Abituale / Stazionario"
-            elif minuti <= 15:
-                return "🚨 SOSPETTO (Nuovo / Breve Stazionamento)"
-            else:
-                return "🔍 Occasionale"
-
-        permanenza["Profilo Comportamento"] = permanenza.apply(classifica_comportamento, axis=1)
-
-        permanenza["Primo Avvistamento"] = permanenza["Primo_Avvistamento"].dt.strftime("%d/%m %H:%M:%S")
-        permanenza["Ultimo Avvistamento"] = permanenza["Ultimo_Avvistamento"].dt.strftime("%d/%m %H:%M:%S")
-
-        if solo_sospetti:
-            mac_sospetti = permanenza[permanenza["Profilo Comportamento"].str.contains("SOSPETTO|Occasionale")]["mac"].tolist()
-            df = df[df["mac"].isin(mac_sospetti)]
-
-# -------------------------------------------------------------------------
-# GRAFICI & ANALISI STORICA
-# -------------------------------------------------------------------------
-if not df.empty and len(df) > 1:
-    st.subheader("📊 Grafici e Trend degli Eventi")
-
-    col_chart1, col_chart2 = st.columns(2)
-
-    with col_chart1:
-        st.markdown("##### 📈 Andamento Distanza nel Tempo")
-        
-        df_chart = df.dropna(subset=["dt"]).sort_values("dt")
-        df_valid_dist = df_chart[df_chart["distance"] > 0]
-
-        fig_dist = px.line(
-            df_valid_dist, 
-            x="dt", 
-            y="distance", 
-            color="status",
-            markers=True,
-            color_discrete_map=color_map,
-            labels={"distance": "Distanza (m)", "dt": "Data e Ora"},
-            title="Variazione Distanza Bersaglio"
-        )
-        fig_dist.update_xaxes(type='date', tickformat="%d/%m %H:%M")
-        fig_dist.update_traces(marker=dict(size=7))
-        fig_dist.update_layout(hovermode="x unified", margin=dict(l=20, r=20, t=40, b=20))
-
-        st.plotly_chart(fig_dist, use_container_width=True)
-
-    with col_chart2:
-        st.markdown("##### 🏆 Ranking MAC Address (Frequenza Rilevamenti)")
-        mac_counts = df["mac"].value_counts().reset_index()
-        mac_counts.columns = ["MAC Address", "Conteggio"]
-
-        fig_mac = px.bar(
-            mac_counts,
-            x="Conteggio",
-            y="MAC Address",
-            orientation="h",
-            text="Conteggio",
-            color="Conteggio",
-            color_continuous_scale="Reds",
-            title="Frequenza Rilevamenti per MAC"
-        )
-        fig_mac.update_layout(yaxis={"categoryorder": "total ascending"})
-        st.plotly_chart(fig_mac, use_container_width=True)
-
-    # -------------------------------------------------------------------------
-    # TEMPI DI PERMANENZA & CLASSIFICAZIONE COMPORTAMENTALE
-    # -------------------------------------------------------------------------
-    st.divider()
-    st.subheader("⏱️ Tempi di Permanenza & Classificazione Sospetti")
-
-    if not permanenza.empty:
-        col_perm1, col_perm2 = st.columns([2, 1])
-
-        with col_perm1:
-            st.markdown("##### ⏳ Durata Permanenza per Dispositivo (Minuti)")
-            fig_perm = px.bar(
-                permanenza.sort_values("Permanenza (Minuti)", ascending=False),
-                x="mac",
-                y="Permanenza (Minuti)",
-                color="Ultimo_Stato",
-                color_discrete_map=color_map,
-                text="Permanenza (Minuti)",
-                labels={"mac": "MAC Address", "Permanenza (Minuti)": "Tempo Totale (min)", "Ultimo_Stato": "Ultimo Stato"},
-                title="Tempo Totale nel Raggio d'Azione"
-            )
-            fig_perm.update_traces(texttemplate='%{text} min', textposition='outside')
-            st.plotly_chart(fig_perm, use_container_width=True)
-
-        with col_perm2:
-            st.markdown("##### 🔍 Profilo di Rischio Dispositivi")
-            
-            # FILTRAGGIO SPECIFICO PER LA TABELLA PROFILO DI RISCHIO
-            permanenza_rischio = permanenza.copy()
-            if filtro_notte:
-                # In modalità notturna isola solo i dispositivi con distanza media oltre 7 metri
-                permanenza_rischio = permanenza_rischio[permanenza_rischio["Distanza_Media"] > 7]
-
-            st.dataframe(
-                permanenza_rischio[[
-                    "mac", 
-                    "Profilo Comportamento",
-                    "Permanenza (Minuti)", 
-                    "Distanza_Media"
-                ]].rename(columns={
-                    "mac": "MAC Address", 
-                    "Distanza_Media": "Dist. Media (m)"
-                }),
-                use_container_width=True,
-                hide_index=True
-            )
-
-    st.divider()
-
-    # -------------------------------------------------------------------------
-    # TABELLA EVENTI & ESPORTAZIONE DATI
-    # -------------------------------------------------------------------------
-    st.subheader("📜 Registro Ultimi Eventi")
-    
-    col_filter, col_export = st.columns([3, 1])
-    
-    with col_filter:
-        filtro_stato = st.multiselect(
-            "Filtra per Stato Evento:",
-            options=df["status"].unique(),
-            default=df["status"].unique()
-        )
-    
-    df_filtered = df[df["status"].isin(filtro_stato)]
-    
-    with col_export:
-        st.markdown(" ")
-        csv_data = df_filtered.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Scarica Dati (CSV)",
-            data=csv_data,
-            file_name="storico_rilevamenti_ble.csv",
-            mime="text/csv"
-        )
-    
-    st.dataframe(df_filtered.iloc[::-1], use_container_width=True)
-
-# -------------------------------------------------------------------------
-# AUTO-REFRESH NATIVO
-# -------------------------------------------------------------------------
-if auto_refresh:
-    time.sleep(refresh_interval)
-    st.cache_data.clear()
-    st.rerun()
+    st.info("Nessun dato disponibile nel foglio di calcolo.")
