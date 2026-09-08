@@ -3,6 +3,10 @@ import pandas as pd
 import requests
 import numpy as np
 import plotly.graph_objects as go
+from streamlit_autorun import autorun  # Importa il refresh automatico
+
+# 1. CONFIGURAZIONE AUTORUN (Aggiorna la mappa ogni 5000 ms = 5 secondi)
+autorun(interval=5000, key="ble_map_autorun")
 
 # 1. CONFIGURAZIONE PAGINA
 st.set_page_config(
