@@ -7,7 +7,7 @@ import time
 # 1. Configurazione della pagina (deve essere la prima istruzione Streamlit)
 st.set_page_config(page_title="Monitoraggio BLE ESP32 - Advanced", layout="wide")
 
-APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyxdcInWY2bY0aJEnHzmxamgQ6qo3I_CnI4quqypDoMrTOMoYuL16pQyVy8JsExb93K/exec"
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbylTrYQm6X2SgvaYPCOK2qTVmzYzc_2jTyesefdGfZNvIJNeccDXx5hA-hN4iZpuUOz/exec"
 
 # -------------------------------------------------------------------------
 # SIDEBAR - CONFIGURAZIONI E FILTRI
