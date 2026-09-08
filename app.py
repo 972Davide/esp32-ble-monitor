@@ -58,7 +58,7 @@ st.markdown("""
 st.markdown("### 📡 [SOC] BLE RADAR & HOUSE PERIMETER MAP")
 st.caption("TACTICAL DISPLAY // REAL-TIME SPATIAL PROXIMITY TRACKING")
 
-URL = "https://script.google.com/macros/s/TUO_SCRIPT_ID/exec?format=json"
+URL = "https://script.google.com/macros/s/AKfycbyW6iY08lTa5ET3M9nsIm-J393Tawv9K_52xE_hyYKydK69Q-j9ywlAgTcFhRYzrYGc/exec?format=json"
 
 try:
     response = requests.get(URL, timeout=8)
