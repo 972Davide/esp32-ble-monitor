@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -60,18 +61,17 @@ DOT_MAP = {
     "SCONOSCIUTO": "⚪"
 }
 
+# --- PARSER RIGOROSO PER DISTANZA METRICA ---
 def parse_distance(val):
     if pd.isna(val):
-        return 2.0
+        return 1.0
     val_str = str(val).replace(',', '.')
-    numbers = re.findall(r"[-+]?(?:\d*\.\d+|\d+)", val_str)
+    numbers = re.findall(r"\d+(?:\.\d+)?", val_str)
     if numbers:
         floats = [float(n) for n in numbers]
         avg = sum(floats) / len(floats)
-        if avg > 20:
-            avg = 10.0 + (avg % 5)
-        return max(avg, 0.5)
-    return 2.0
+        return max(avg, 0.1)
+    return 1.0
 
 @st.cache_data(ttl=2)
 def load_data(url):
@@ -119,13 +119,16 @@ recent_devices = df.groupby(col_mac).last().reset_index()
 st.sidebar.header("⚙️ Configurazione Centralino")
 
 mac_list = sorted(recent_devices[col_mac].dropna().astype(str).unique().tolist())
-my_mac = st.sidebar.selectbox("Seleziona il TUO MAC Address (Centro Radar):", mac_list)
+my_mac = st.sidebar.selectbox("Seleziona il TUO MAC (Centro Radar):", mac_list)
 
 filter_random_mac = st.sidebar.checkbox("Nascondi MAC casuali/temporanei", value=False)
-radar_max_scale = st.sidebar.slider("Scala Massima Radar (m)", 5.0, 25.0, 12.0)
 
 if filter_random_mac:
     recent_devices = recent_devices[~recent_devices[col_mac].apply(is_random_mac)]
+
+# La scala massima del radar si adatta esattamente alla distanza massima presente nei dati + margine
+max_detected = recent_devices['dist_clean'].max() if not recent_devices.empty else 5.0
+radar_max_scale = float(max(5.0, np.ceil(max_detected)))
 
 def get_status_dot(evt):
     evt_upper = str(evt).upper()
@@ -150,48 +153,46 @@ tab_map, tab_table = st.tabs(["🗺️ Radar Planimetria Interactive", "📋 Reg
 with tab_map:
     fig = go.Figure()
 
-    # Centro fisso all'origine (0, 0)
-    sc_x, sc_y = 0.0, 0.0
-
-    # Cerchi del radar
-    step = 2.0
+    # Disegna cerchi concentrici ad ogni metro (o ogni 2m se la scala supera 10m)
+    step = 1.0 if radar_max_scale <= 10 else 2.0
     for r in np.arange(step, radar_max_scale + 0.1, step):
         fig.add_shape(
             type="circle", 
             x0=-r, y0=-r, x1=r, y1=r,
-            line=dict(color="rgba(255, 255, 255, 0.15)", width=1, dash="dot")
+            line=dict(color="rgba(255, 255, 255, 0.2)", width=1, dash="dot")
         )
         fig.add_annotation(
-            x=0, y=r, text=f"{int(r)}m", showarrow=False, 
-            font=dict(color="rgba(255,255,255,0.4)", size=10), yanchor="bottom"
+            x=0, y=r, text=f"{int(r) if r.is_integer() else r}m", showarrow=False, 
+            font=dict(color="rgba(255,255,255,0.5)", size=10), yanchor="bottom"
         )
 
-    # Separa il tuo MAC dagli altri dispositivi
+    # Dispositivo Centrale (TU al centro 0,0)
     my_device_row = recent_devices[recent_devices[col_mac].astype(str) == str(my_mac)]
-    other_devices = recent_devices[recent_devices[col_mac].astype(str) != str(my_mac)]
+    other_devices = recent_devices[recent_devices[col_mac].astype(str) != str(my_mac)].copy()
 
     my_name = my_device_row[col_name].values[0] if not my_device_row.empty and pd.notna(my_device_row[col_name].values[0]) else my_mac
 
-    # Disegna il TUO MAC perfettamente al centro
     fig.add_trace(go.Scatter(
         x=[0], y=[0],
         mode='markers+text',
-        marker=dict(size=22, color='#38bdf8', symbol='diamond', line=dict(color='white', width=2)),
+        marker=dict(size=18, color='#38bdf8', symbol='diamond', line=dict(color='white', width=2)),
         text=[f"<b>TU ({my_name})</b>"],
         textposition="top center",
         hoverinfo='text',
-        hovertext=f"<b>IL TUO DISPOSITIVO</b><br>MAC: {my_mac}",
-        name="Mio Dispositivo"
+        hovertext=f"<b>IL TUO DISPOSITIVO (CENTRO)</b><br>MAC: {my_mac}",
+        name="Centro"
     ))
 
     target_x, target_y, target_texts, point_labels, marker_colors, marker_sizes = [], [], [], [], [], []
 
     num_others = len(other_devices)
     if num_others > 0:
+        # Sfasamento angolare uniforme a 360° per evitare sovrapposizioni visive
         angles = np.linspace(0, 2 * np.pi, num_others, endpoint=False)
 
         for idx, (_, row) in enumerate(other_devices.iterrows()):
-            dist = min(float(row['dist_clean']), radar_max_scale - 0.5)
+            # La distanza R corrisponde esattamene al valore in metri estratto
+            r_dist = float(row['dist_clean'])
             evt_str = str(row[col_event]).upper()
             mac_str = str(row[col_mac])
             name_str = str(row[col_name])
@@ -205,8 +206,9 @@ with tab_map:
                     break
 
             angle = angles[idx]
-            calc_x = dist * np.cos(angle)
-            calc_y = dist * np.sin(angle)
+            # Calcolo trigonometrico polare 1:1
+            calc_x = r_dist * np.cos(angle)
+            calc_y = r_dist * np.sin(angle)
 
             target_x.append(calc_x)
             target_y.append(calc_y)
@@ -214,13 +216,13 @@ with tab_map:
             marker_sizes.append(14 if "ENTRATO" in evt_str else 10)
 
             label_name = name_str if pd.notna(name_str) and str(name_str).strip() != 'nan' else mac_str
-            point_labels.append(f"{dot_icon} {label_name}")
+            point_labels.append(f"{dot_icon} {label_name} ({r_dist:.1f}m)")
 
             target_texts.append(
                 f"<b>Dispositivo:</b> {name_str}<br>"
                 f"<b>MAC:</b> {mac_str}<br>"
                 f"<b>Stato:</b> {dot_icon} {evt_str}<br>"
-                f"<b>Distanza da te:</b> {row['dist_clean']:.2f} m"
+                f"<b>Distanza Reale:</b> {r_dist:.2f} m"
             )
 
     if target_x:
@@ -242,7 +244,7 @@ with tab_map:
             name='Dispositivi BLE'
         ))
 
-    pad = radar_max_scale + 1.0
+    pad = radar_max_scale + 0.5
     fig.update_layout(
         xaxis=dict(range=[-pad, pad], showgrid=False, zeroline=False, visible=False),
         yaxis=dict(range=[-pad, pad], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
