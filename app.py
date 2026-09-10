@@ -113,11 +113,12 @@ col_uuid = find_col(['uuid', 'service'], 6)
 df = df_raw.copy()
 df['dist_clean'] = df[col_dist].apply(parse_distance)
 
-# Forziamo il nome corretto per il Galaxy A52s-5G se il campo nome è vuoto o generico
+# Conversione della colonna nome a stringa e forzatura nome per il Galaxy A52s-5G
 TARGET_MAC = "12:6e:91:f8:2d:fa"
 target_clean_mac = TARGET_MAC.replace("-", ":").lower()
 
 if col_name is not None and col_mac is not None:
+    df[col_name] = df[col_name].astype(str)
     mask_target = df[col_mac].astype(str).str.replace("-", ":").str.lower() == target_clean_mac
     df.loc[mask_target, col_name] = "Galaxy-A52s-5G"
 
