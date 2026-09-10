@@ -129,7 +129,8 @@ if filter_night_hours and col_time is not None:
 if exclude_static_macs:
     df = df[df[col_mac].apply(is_random_mac)]
 
-# Applicazione filtro Esclusione MAC specifici
+# Applicazione filtro Esclusione MAC specifici (ma escludiamo il MAC speciale dalla blacklist per sicurezza)
+TARGET_MAC = "12:6e:91:f8:2d:fa"
 if exclude_specific_macs and col_mac is not None:
     blacklisted_macs = {
         "52:c5:37:97:ce:18",
@@ -169,10 +170,11 @@ k3.metric("Eventi Critici", f"🔴 {active_alarms}")
 k4.metric("Ultimo Log", last_update)
 
 # --- TAB APPLICAZIONE ---
-tab_map, tab_table, tab_new_mac = st.tabs([
+tab_map, tab_table, tab_new_mac, tab_target_mac = st.tabs([
     "🗺️ Radar Planimetria Interactive", 
     "📋 Registro Dati Dettagliato", 
-    "🏷️ Tabella Nuovi MAC"
+    "🏷️ Tabella Nuovi MAC",
+    f"🎯 Target ({TARGET_MAC})"
 ])
 
 with tab_map:
@@ -312,3 +314,70 @@ with tab_new_mac:
             st.info("Nessun nuovo dispositivo contrassegnato come 'ENTRATO' trovato nei dati filtrati correnti.")
     else:
         st.warning("Dati non disponibili per popolare la tabella dei nuovi MAC.")
+
+with tab_target_mac:
+    st.subheader(f"🎯 Pannello Dedicato al Dispositivo: `{TARGET_MAC}`")
+    
+    # Filtriamo tutto il dataframe storico per questo specifico MAC (ignorando maiuscole/minuscole o trattini)
+    target_clean_mac = TARGET_MAC.replace("-", ":").lower()
+    df_target_history = df[df[col_mac].astype(str).str.replace("-", ":").str.lower() == target_clean_mac].copy()
+    
+    if not df_target_history.empty:
+        # Ultimo stato noto del target
+        latest_target_row = df_target_history.iloc[-1]
+        t_name = latest_target_row.get(col_name, "Sconosciuto")
+        t_dist = latest_target_row.get('dist_clean', 0.0)
+        t_event = latest_target_row.get(col_event, "N/D")
+        t_tx = latest_target_row.get(col_tx, "N/D")
+        t_uuid = latest_target_row.get(col_uuid, "N/D")
+        t_time = latest_target_row.get(col_time, "N/D")
+        
+        # Metriche in evidenza per il target
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Nome Dispositivo", str(t_name))
+        m2.metric("Distanza Attuale", f"{t_dist:.2f} m")
+        m3.metric("Stato Ultimo Rilevamento", str(t_event))
+        m4.metric("Ultima Seen", str(t_time))
+        
+        st.markdown("---")
+        
+        c_info1, c_info2 = st.columns(2)
+        c_info1.info(f"**TX Power configurato:** `{t_tx}` dBm")
+        c_info2.info(f"**Service UUID:** `{t_uuid}`")
+        
+        st.markdown("### 📈 Grafico Storico Distanza nel Tempo")
+        if col_time is not None and not df_target_history.empty:
+            df_target_history['parsed_time'] = pd.to_datetime(df_target_history[col_time], errors='coerce')
+            df_target_history = df_target_history.sort_values('parsed_time')
+            
+            fig_target = go.Figure()
+            fig_target.add_trace(go.Scatter(
+                x=df_target_history['parsed_time'],
+                y=df_target_history['dist_clean'],
+                mode='lines+markers',
+                name='Distanza (m)',
+                line=dict(color='#38bdf8', width=2),
+                marker=dict(size=6)
+            ))
+            fig_target.update_layout(
+                xaxis_title="Tempo",
+                yaxis_title="Distanza stimata (metri)",
+                height=350,
+                margin=dict(l=10, r=10, t=10, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)"
+            )
+            st.plotly_chart(fig_target, use_container_width=True)
+            
+        st.markdown("### 🕒 Storico Eventi di questo MAC")
+        display_target_df = df_target_history.copy()
+        display_target_df[col_event] = display_target_df[col_event].apply(get_status_dot)
+        cols_target_show = [c for c in [col_time, col_name, col_mac, col_dist, col_tx, col_uuid, col_event] if c is not None]
+        
+        st.dataframe(
+            display_target_df[cols_target_show].sort_values(by=col_time, ascending=False),
+            use_container_width=True,
+            height=300
+        )
+    else:
+        st.warning(f"Nessun dato registrato o trovato nel Google Sheet per il MAC `{TARGET_MAC}`.")
