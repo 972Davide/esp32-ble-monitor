@@ -61,7 +61,6 @@ DOT_MAP = {
     "SCONOSCIUTO": "⚪"
 }
 
-# --- PARSER RIGOROSO PER DISTANZA METRICA ---
 def parse_distance(val):
     if pd.isna(val):
         return 1.0
@@ -113,20 +112,25 @@ col_event = find_col(['event', 'stato', 'status', 'allarme'], 4)
 df = df_raw.copy()
 df['dist_clean'] = df[col_dist].apply(parse_distance)
 
-recent_devices = df.groupby(col_mac).last().reset_index()
-
-# --- BARRA LATERALE ---
+# --- FILTRO ORARIO (00:00 - 04:00) ---
 st.sidebar.header("⚙️ Configurazione Centralino")
+filter_night_hours = st.sidebar.checkbox("Escludi rilevazioni 00:00 - 04:00", value=True)
 
-mac_list = sorted(recent_devices[col_mac].dropna().astype(str).unique().tolist())
-my_mac = st.sidebar.selectbox("Seleziona il TUO MAC (Centro Radar):", mac_list)
+if filter_night_hours and col_time is not None:
+    # Conversione in formato orario per estrarre l'ora di registrazione
+    times_parsed = pd.to_datetime(df[col_time], errors='coerce').dt.hour
+    # Mantiene solo i dati registrati al di fuori della fascia 00:00 - 03:59
+    df = df[~((times_parsed >= 0) & (times_parsed < 4))]
 
 filter_random_mac = st.sidebar.checkbox("Nascondi MAC casuali/temporanei", value=False)
-
 if filter_random_mac:
-    recent_devices = recent_devices[~recent_devices[col_mac].apply(is_random_mac)]
+    df = df[~df[col_mac].apply(is_random_mac)]
 
-# La scala massima del radar si adatta esattamente alla distanza massima presente nei dati + margine
+recent_devices = df.groupby(col_mac).last().reset_index()
+
+mac_list = sorted(recent_devices[col_mac].dropna().astype(str).unique().tolist()) if not recent_devices.empty else []
+my_mac = st.sidebar.selectbox("Seleziona il TUO MAC (Centro Radar):", mac_list) if mac_list else ""
+
 max_detected = recent_devices['dist_clean'].max() if not recent_devices.empty else 5.0
 radar_max_scale = float(max(5.0, np.ceil(max_detected)))
 
@@ -139,7 +143,7 @@ def get_status_dot(evt):
 
 # --- METRICHE ---
 k1, k2, k3, k4 = st.columns(4)
-active_alarms = sum(1 for e in recent_devices[col_event].astype(str) if "ENTRATO" in e.upper())
+active_alarms = sum(1 for e in recent_devices[col_event].astype(str) if "ENTRATO" in e.upper()) if not recent_devices.empty else 0
 last_update = str(df[col_time].iloc[-1]) if col_time and not df.empty else "--"
 
 k1.metric("Stato Perimetro", "🔴 INTRUSIONE" if active_alarms > 0 else "🟢 SICURO")
@@ -153,7 +157,6 @@ tab_map, tab_table = st.tabs(["🗺️ Radar Planimetria Interactive", "📋 Reg
 with tab_map:
     fig = go.Figure()
 
-    # Disegna cerchi concentrici ad ogni metro (o ogni 2m se la scala supera 10m)
     step = 1.0 if radar_max_scale <= 10 else 2.0
     for r in np.arange(step, radar_max_scale + 0.1, step):
         fig.add_shape(
@@ -166,20 +169,20 @@ with tab_map:
             font=dict(color="rgba(255,255,255,0.5)", size=10), yanchor="bottom"
         )
 
-    # Dispositivo Centrale (TU al centro 0,0)
-    my_device_row = recent_devices[recent_devices[col_mac].astype(str) == str(my_mac)]
-    other_devices = recent_devices[recent_devices[col_mac].astype(str) != str(my_mac)].copy()
+    my_device_row = recent_devices[recent_devices[col_mac].astype(str) == str(my_mac)] if my_mac else pd.DataFrame()
+    other_devices = recent_devices[recent_devices[col_mac].astype(str) != str(my_mac)].copy() if my_mac else recent_devices.copy()
 
     my_name = my_device_row[col_name].values[0] if not my_device_row.empty and pd.notna(my_device_row[col_name].values[0]) else my_mac
 
+    # Dispositivo Centrale
     fig.add_trace(go.Scatter(
         x=[0], y=[0],
         mode='markers+text',
         marker=dict(size=18, color='#38bdf8', symbol='diamond', line=dict(color='white', width=2)),
-        text=[f"<b>TU ({my_name})</b>"],
+        text=[f"<b>TU ({my_name})</b>" if my_mac else "<b>Centro</b>"],
         textposition="top center",
         hoverinfo='text',
-        hovertext=f"<b>IL TUO DISPOSITIVO (CENTRO)</b><br>MAC: {my_mac}",
+        hovertext=f"<b>DISPOSITIVO CENTRALE</b><br>MAC: {my_mac}",
         name="Centro"
     ))
 
@@ -187,11 +190,9 @@ with tab_map:
 
     num_others = len(other_devices)
     if num_others > 0:
-        # Sfasamento angolare uniforme a 360° per evitare sovrapposizioni visive
         angles = np.linspace(0, 2 * np.pi, num_others, endpoint=False)
 
         for idx, (_, row) in enumerate(other_devices.iterrows()):
-            # La distanza R corrisponde esattamene al valore in metri estratto
             r_dist = float(row['dist_clean'])
             evt_str = str(row[col_event]).upper()
             mac_str = str(row[col_mac])
@@ -206,7 +207,6 @@ with tab_map:
                     break
 
             angle = angles[idx]
-            # Calcolo trigonometrico polare 1:1
             calc_x = r_dist * np.cos(angle)
             calc_y = r_dist * np.sin(angle)
 
@@ -260,11 +260,12 @@ with tab_map:
 with tab_table:
     st.subheader("📋 Registro Dettagliato Dispositivi")
     display_df = recent_devices.copy()
-    display_df[col_event] = display_df[col_event].apply(get_status_dot)
-    cols_to_show = [c for c in [col_time, col_name, col_mac, col_dist, col_event] if c is not None]
-    
-    st.dataframe(
-        display_df[cols_to_show].sort_values(by=col_dist, ascending=True),
-        use_container_width=True,
-        height=550
-    )
+    if not display_df.empty:
+        display_df[col_event] = display_df[col_event].apply(get_status_dot)
+        cols_to_show = [c for c in [col_time, col_name, col_mac, col_dist, col_event] if c is not None]
+        
+        st.dataframe(
+            display_df[cols_to_show].sort_values(by=col_dist, ascending=True),
+            use_container_width=True,
+            height=550
+        )
