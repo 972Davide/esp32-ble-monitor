@@ -38,24 +38,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Autorefresh ogni 5 secondi
 st_autorefresh(interval=5000, limit=None, key="ble_refresh")
 
 st.title("📡 BLE Intrusion Detection & Tactical Radar")
 
-# --- PARAMETRI FISSI & COSTANTI ---
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQfyw4jBL1NZwI9KC4KaYEIVzcJPBOfabbBgBdF0j35liabae4rn0NbYU2lrY6-4NYsEY-MFaP0OSl8/pub?output=csv"
 
-SCANNER_POS = {
-    "Scanner_1": (0.0, 0.0) # Posizionato all'origine del Radar
-}
+SCANNER_POS = {"Scanner_1": (0.0, 0.0)}
 
 COLOR_MAP = {
-    "ENTRATO": "#ef4444",   # Rosso allarme
-    "PRESENTE": "#f59e0b",  # Giallo avviso
-    "SPOSTATO": "#06b6d4",  # Ciano dinamico
-    "USCITO": "#10b981",    # Verde sicuro
-    "SCONOSCIUTO": "#6b7280"# Grigio neutro
+    "ENTRATO": "#ef4444",   # Rosso
+    "PRESENTE": "#f59e0b",  # Giallo
+    "SPOSTATO": "#06b6d4",  # Ciano
+    "USCITO": "#10b981",    # Verde
+    "SCONOSCIUTO": "#6b7280"# Grigio
 }
 
 DOT_MAP = {
@@ -66,7 +62,7 @@ DOT_MAP = {
     "SCONOSCIUTO": "⚪"
 }
 
-# --- FUNZIONE PARSER DISTANZA PROPORZIONALE ---
+# --- FUNZIONE PARSER DISTANZA (Corretta e Limitate) ---
 def parse_distance(val):
     if pd.isna(val):
         return 2.0
@@ -75,14 +71,16 @@ def parse_distance(val):
     if numbers:
         floats = [float(n) for n in numbers]
         avg = sum(floats) / len(floats)
-        return max(avg, 0.5)
+        # Se il numero estratto è anomalo (> 15m), lo scala proporzionalmente
+        if avg > 15:
+            avg = 10.0 + (avg % 5)
+        return max(avg, 1.0)
     return 2.0
 
 # --- BARRA LATERALE ---
 st.sidebar.header("⚙️ Filtri & Configurazione")
 filter_random_mac = st.sidebar.checkbox("Nascondi MAC casuali/temporanei", value=False)
-show_all_devices = st.sidebar.checkbox("Mostra TUTTI i dispositivi nel Radar", value=True)
-max_distance_cutoff = st.sidebar.slider("Distanza Massima Visualizzata (m)", 1.0, 30.0, 15.0)
+radar_max_scale = st.sidebar.slider("Scala Massima Radar (m)", 5.0, 20.0, 10.0)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔴 Legenda Stati")
@@ -94,7 +92,6 @@ st.sidebar.markdown("""
 * ⚪ **ALTRO** - Non definito
 """)
 
-# --- FUNZIONE CARICAMENTO DATI ---
 @st.cache_data(ttl=2)
 def load_data(url):
     try:
@@ -115,7 +112,7 @@ def is_random_mac(mac):
 df_raw = load_data(SHEET_CSV_URL)
 
 if df_raw.empty:
-    st.error("⚠️ Impossibile caricare i dati dal Google Sheet. Verifica l'URL o la connessione.")
+    st.error("⚠️ Impossibile caricare i dati dal Google Sheet.")
     st.stop()
 
 cols_lower = [c.lower() for c in df_raw.columns]
@@ -138,9 +135,6 @@ df['dist_clean'] = df[col_dist].apply(parse_distance)
 if filter_random_mac:
     df = df[~df[col_mac].apply(is_random_mac)]
 
-if not show_all_devices:
-    df = df[df['dist_clean'] <= max_distance_cutoff]
-
 recent_devices = df.groupby(col_mac).last().reset_index()
 
 def get_status_dot(evt):
@@ -160,7 +154,7 @@ k2.metric("Dispositivi Rilevati", f"🔵 {len(recent_devices)}")
 k3.metric("Eventi Critici", f"🔴 {active_alarms}")
 k4.metric("Ultimo Log", last_update)
 
-# --- TABS INTERFACCIA ---
+# --- TAB RADAR ---
 tab_map, tab_table = st.tabs(["🗺️ Radar Planimetria Interactive", "📋 Registro Dati Dettagliato"])
 
 with tab_map:
@@ -168,13 +162,9 @@ with tab_map:
 
     sc_x, sc_y = SCANNER_POS["Scanner_1"]
 
-    # Raggio massimo proporzionale per il rendering dei cerchi
-    max_detected_dist = recent_devices['dist_clean'].max() if not recent_devices.empty else 10.0
-    radar_limit = max(10.0, float(np.ceil(max_detected_dist)))
-
-    # Anelli concentrici di misurazione metri in scala esatta
-    step = 2 if radar_limit <= 12 else 5
-    for r in np.arange(step, radar_limit + step, step):
+    # Cerchi del radar con passo di 2 metri fino alla scala massima scelta
+    step = 2.0
+    for r in np.arange(step, radar_max_scale + 0.1, step):
         fig.add_shape(
             type="circle", 
             x0=sc_x - r, y0=sc_y - r, x1=sc_x + r, y1=sc_y + r,
@@ -185,11 +175,11 @@ with tab_map:
             font=dict(color="rgba(255,255,255,0.4)", size=10), yanchor="bottom"
         )
 
-    # Plot Scanner Centralizzatore
+    # Marker dello Scanner al centro
     fig.add_trace(go.Scatter(
         x=[sc_x], y=[sc_y],
         mode='markers+text',
-        marker=dict(size=22, color='#38bdf8', symbol='diamond', line=dict(color='white', width=2)),
+        marker=dict(size=20, color='#38bdf8', symbol='diamond', line=dict(color='white', width=2)),
         text=["<b>Scanner_1</b>"],
         textposition="top center",
         hoverinfo='text',
@@ -198,16 +188,15 @@ with tab_map:
 
     target_x, target_y, target_texts, point_labels, marker_colors, marker_sizes = [], [], [], [], [], []
 
-    # Raggruppamento dispositivi per distanza esatta per calcolare lo sfalsamento d'angolo
-    grouped_by_dist = recent_devices.groupby('dist_clean')
-
-    for dist, group in grouped_by_dist:
-        count = len(group)
-        # Sfasamento angolare uniforme per tutti i punti che hanno la medesima distanza
-        angle_step = (2 * np.pi) / count
-        start_angle = np.random.uniform(0, 2 * np.pi)
-
-        for i, (_, row) in enumerate(group.iterrows()):
+    # Disposizione dei dispositivi
+    num_devs = len(recent_devices)
+    if num_devs > 0:
+        # Sfalsa uniformemente gli angoli per rendere tutti i dispositivi ben leggibili
+        angles = np.linspace(0, 2 * np.pi, num_devs, endpoint=False)
+        
+        for idx, (_, row) in enumerate(recent_devices.iterrows()):
+            # La distanza non supera mai la scala radiale visibile
+            dist = min(float(row['dist_clean']), radar_max_scale - 0.5)
             evt_str = str(row[col_event]).upper()
             mac_str = str(row[col_mac])
             name_str = str(row[col_name])
@@ -220,27 +209,25 @@ with tab_map:
                     dot_icon = DOT_MAP[key]
                     break
 
-            # Calcolo Trigonometrico Proporzionale 1:1
-            angle = start_angle + (i * angle_step)
+            angle = angles[idx]
             calc_x = sc_x + (dist * np.cos(angle))
             calc_y = sc_y + (dist * np.sin(angle))
 
             target_x.append(calc_x)
             target_y.append(calc_y)
             marker_colors.append(color)
-            marker_sizes.append(15 if "ENTRATO" in evt_str else 11)
+            marker_sizes.append(14 if "ENTRATO" in evt_str else 10)
 
-            label_text = name_str if pd.notna(name_str) and str(name_str).strip() != 'nan' else mac_str
-            point_labels.append(f"{dot_icon} {label_text}")
+            label_name = name_str if pd.notna(name_str) and str(name_str).strip() != 'nan' else mac_str
+            point_labels.append(f"{dot_icon} {label_name}")
 
             target_texts.append(
                 f"<b>Dispositivo:</b> {name_str}<br>"
                 f"<b>MAC:</b> {mac_str}<br>"
                 f"<b>Stato:</b> {dot_icon} {evt_str}<br>"
-                f"<b>Distanza Reale:</b> {dist:.2f} m"
+                f"<b>Distanza:</b> {row['dist_clean']:.2f} m"
             )
 
-    # Rendering visivo dei punti sparpagliati in proporzione esatta
     if target_x:
         fig.add_trace(go.Scatter(
             x=target_x,
@@ -249,8 +236,8 @@ with tab_map:
             marker=dict(
                 size=marker_sizes, 
                 color=marker_colors, 
-                opacity=0.95, 
-                line=dict(width=1.2, color='#ffffff')
+                opacity=0.9, 
+                line=dict(width=1, color='#ffffff')
             ),
             text=point_labels,
             textposition="top center",
@@ -260,12 +247,11 @@ with tab_map:
             name='Dispositivi BLE'
         ))
 
-    # Layout proporzionale rigido (1 metro X = 1 metro Y)
-    pad = radar_limit + 2.0
+    pad = radar_max_scale + 1.0
     fig.update_layout(
         xaxis=dict(range=[-pad, pad], showgrid=False, zeroline=False, visible=False),
         yaxis=dict(range=[-pad, pad], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
-        height=750,
+        height=700,
         margin=dict(l=10, r=10, t=10, b=10),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
@@ -276,10 +262,8 @@ with tab_map:
 
 with tab_table:
     st.subheader("📋 Registro Dettagliato Dispositivi")
-    
     display_df = recent_devices.copy()
     display_df[col_event] = display_df[col_event].apply(get_status_dot)
-    
     cols_to_show = [c for c in [col_time, col_name, col_mac, col_dist, col_event] if c is not None]
     
     st.dataframe(
