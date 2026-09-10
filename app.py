@@ -45,11 +45,11 @@ st.title("📡 BLE Intrusion Detection & Tactical Radar")
 # --- PARAMETRI FISSI & COSTANTI ---
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQfyw4jBL1NZwI9KC4KaYEIVzcJPBOfabbBgBdF0j35liabae4rn0NbYU2lrY6-4NYsEY-MFaP0OSl8/pub?output=csv"
 
-# Posizione dell'unico scanner al centro dell'area o all'ingresso (5.0, 5.0)
 SCANNER_POS = {
     "Scanner_1": (5.0, 5.0)
 }
 
+# Mappatura dei colori e dei pallini simbolici
 COLOR_MAP = {
     "ENTRATO": "#ef4444",   # Rosso allarme
     "PRESENTE": "#f59e0b",  # Giallo avviso
@@ -58,10 +58,29 @@ COLOR_MAP = {
     "SCONOSCIUTO": "#6b7280"# Grigio neutro
 }
 
+DOT_MAP = {
+    "ENTRATO": "🔴",
+    "PRESENTE": "🟡",
+    "SPOSTATO": "🔵",
+    "USCITO": "🟢",
+    "SCONOSCIUTO": "⚪"
+}
+
 # --- BARRA LATERALE ---
 st.sidebar.header("⚙️ Filtri & Configurazione")
 filter_random_mac = st.sidebar.checkbox("Nascondi MAC casuali/temporanei", value=True)
 max_distance_cutoff = st.sidebar.slider("Distanza Massima Radar (m)", 1.0, 20.0, 10.0)
+
+# Legenda pallini in sidebar
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔴 Legenda Stati")
+st.sidebar.markdown("""
+* 🔴 **ENTRATO** - Allarme Intrusione
+* 🟡 **PRESENTE** - Rilevato in zona
+* 🔵 **SPOSTATO** - In movimento
+* 🟢 **USCITO** - Fuori perimetro
+* ⚪ **ALTRO** - Non definito
+""")
 
 # --- FUNZIONE CARICAMENTO DATI ---
 @st.cache_data(ttl=2)
@@ -101,7 +120,6 @@ col_name = find_col(['nam', 'nom', 'dev'], 1)
 col_mac = find_col(['mac', 'address', 'indirizzo'], 2)
 col_dist = find_col(['dist', 'rssi', 'metri'], 3)
 col_event = find_col(['event', 'stato', 'status', 'allarme'], 4)
-col_gw = find_col(['gateway', 'scanner', 'nodo'], 5)
 
 # Conversione e pulizia tipi
 df = df_raw.copy()
@@ -110,20 +128,27 @@ df[col_dist] = pd.to_numeric(df[col_dist].astype(str).str.replace(',', '.'), err
 if filter_random_mac:
     df = df[~df[col_mac].apply(is_random_mac)]
 
-# Filtra eventuali dispositivi oltre la distanza limite impostata dallo slider
 df = df[df[col_dist] <= max_distance_cutoff]
 
-# Estrazione ultimo evento per dispositivo
+# Estrazione ultimo evento per ciascun dispositivo
 recent_devices = df.groupby(col_mac).last().reset_index()
+
+# Assistente per attribuire il pallino corrispondente allo stato
+def get_status_dot(evt):
+    evt_upper = str(evt).upper()
+    for key, dot in DOT_MAP.items():
+        if key in evt_upper:
+            return f"{dot} {evt_upper}"
+    return f"⚪ {evt_upper}"
 
 # --- METRICHE E KPI ---
 k1, k2, k3, k4 = st.columns(4)
 active_alarms = sum(1 for e in recent_devices[col_event].astype(str) if "ENTRATO" in e.upper())
 last_update = str(df[col_time].iloc[-1]) if col_time and not df.empty else "--"
 
-k1.metric("Stato Perimetro", "⚠️ INTRUSIONE" if active_alarms > 0 else "✅ SICURO")
-k2.metric("Dispositivi Attivi", len(recent_devices))
-k3.metric("Eventi Critici", active_alarms)
+k1.metric("Stato Perimetro", "🔴 INTRUSIONE" if active_alarms > 0 else "🟢 SICURO")
+k2.metric("Dispositivi Attivi", f"🔵 {len(recent_devices)}")
+k3.metric("Eventi Critici", f"🔴 {active_alarms}")
 k4.metric("Ultimo Log", last_update)
 
 # --- TABS INTERFACCIA ---
@@ -132,14 +157,14 @@ tab_map, tab_table = st.tabs(["🗺️ Radar Planimetria Interactive", "📋 Reg
 with tab_map:
     fig = go.Figure()
 
-    # Cerchi concentrici attorno allo Scanner_1 (distanze reali in metri)
+    # Cerchi concentrici Radar
     for r in [2, 4, 6, 8, 10]:
         fig.add_shape(type="circle", x0=5-r, y0=5-r, x1=5+r, y1=5+r,
                       line=dict(color="rgba(255, 255, 255, 0.1)", width=1, dash="dot"))
         fig.add_annotation(x=5, y=5+r, text=f"{r}m", showarrow=False, 
                            font=dict(color="rgba(255,255,255,0.3)", size=10), yanchor="bottom")
 
-    # Plot del singolo Scanner
+    # Plot dello Scanner
     sc_x, sc_y = SCANNER_POS["Scanner_1"]
     fig.add_trace(go.Scatter(
         x=[sc_x], y=[sc_y],
@@ -152,7 +177,7 @@ with tab_map:
     ))
 
     target_x, target_y, target_texts, colors, marker_sizes = [], [], [], [], []
-    np.random.seed(42)  # Mantiene stabile il posizionamento tra i refresh
+    np.random.seed(42)
 
     for _, row in recent_devices.iterrows():
         dist = float(row[col_dist])
@@ -160,18 +185,16 @@ with tab_map:
         mac_str = str(row[col_mac])
         name_str = str(row[col_name])
 
-        if "ENTRATO" in evt_str:
-            color = COLOR_MAP["ENTRATO"]
-        elif "PRESENTE" in evt_str:
-            color = COLOR_MAP["PRESENTE"]
-        elif "USCITO" in evt_str:
-            color = COLOR_MAP["USCITO"]
-        else:
-            color = COLOR_MAP["SCONOSCIUTO"]
+        dot_icon = "⚪"
+        color = COLOR_MAP["SCONOSCIUTO"]
+        for key in COLOR_MAP:
+            if key in evt_str:
+                color = COLOR_MAP[key]
+                dot_icon = DOT_MAP[key]
+                break
 
-        # Disposizione dei dispositivi in orbita polare rispetto allo Scanner_1 basata sulla distanza
+        # Disposizione polare
         angle = np.random.uniform(0, 2 * np.pi)
-        
         calc_x = sc_x + (dist * np.cos(angle))
         calc_y = sc_y + (dist * np.sin(angle))
 
@@ -183,11 +206,11 @@ with tab_map:
         target_texts.append(
             f"<b>Dispositivo:</b> {name_str}<br>"
             f"<b>MAC:</b> {mac_str}<br>"
-            f"<b>Stato:</b> {evt_str}<br>"
-            f"<b>Distanza dallo Scanner:</b> {dist:.2f} m"
+            f"<b>Stato:</b> {dot_icon} {evt_str}<br>"
+            f"<b>Distanza:</b> {dist:.2f} m"
         )
 
-    # Dispositivi rilevati
+    # Dispositivi rilevati sul Radar
     if target_x:
         fig.add_trace(go.Scatter(
             x=target_x,
@@ -214,10 +237,14 @@ with tab_map:
 with tab_table:
     st.subheader("📋 Registro Dettagliato Dispositivi")
     
+    # Formattazione della colonna Stato con i pallini
+    display_df = recent_devices.copy()
+    display_df[col_event] = display_df[col_event].apply(get_status_dot)
+    
     cols_to_show = [c for c in [col_time, col_name, col_mac, col_dist, col_event] if c is not None]
     
     st.dataframe(
-        recent_devices[cols_to_show].sort_values(by=col_dist, ascending=True),
+        display_df[cols_to_show].sort_values(by=col_dist, ascending=True),
         use_container_width=True,
         height=550
     )
