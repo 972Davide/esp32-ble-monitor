@@ -66,22 +66,23 @@ DOT_MAP = {
     "SCONOSCIUTO": "⚪"
 }
 
-# --- FUNZIONE PARSER DISTANZA (Gestisce "5m-7m", "3.5", "5m") ---
+# --- FUNZIONE PARSER DISTANZA ---
 def parse_distance(val):
     if pd.isna(val):
-        return 1.0
+        return 3.0
     val_str = str(val).replace(',', '.')
     numbers = re.findall(r"[-+]?(?:\d*\.\d+|\d+)", val_str)
     if numbers:
-        # Se c'è un intervallo es. 5-7, fa la media (6.0), altrimenti prende il numero
         floats = [float(n) for n in numbers]
-        return sum(floats) / len(floats)
-    return 1.0
+        avg = sum(floats) / len(floats)
+        return avg if avg > 0 else 1.0
+    return 3.0
 
 # --- BARRA LATERALE ---
 st.sidebar.header("⚙️ Filtri & Configurazione")
-filter_random_mac = st.sidebar.checkbox("Nascondi MAC casuali/temporanei", value=True)
-max_distance_cutoff = st.sidebar.slider("Distanza Massima Radar (m)", 1.0, 20.0, 15.0)
+filter_random_mac = st.sidebar.checkbox("Nascondi MAC casuali/temporanei", value=False)
+show_all_devices = st.sidebar.checkbox("Mostra TUTTI i dispositivi nel Radar", value=True)
+max_distance_cutoff = st.sidebar.slider("Distanza Massima Radar (m)", 1.0, 30.0, 20.0)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔴 Legenda Stati")
@@ -132,15 +133,15 @@ col_dist = find_col(['dist', 'rssi', 'metri'], 3)
 col_event = find_col(['event', 'stato', 'status', 'allarme'], 4)
 
 df = df_raw.copy()
-
-# Conversione robusta della distanza
 df['dist_clean'] = df[col_dist].apply(parse_distance)
 
 if filter_random_mac:
     df = df[~df[col_mac].apply(is_random_mac)]
 
-df = df[df['dist_clean'] <= max_distance_cutoff]
+if not show_all_devices:
+    df = df[df['dist_clean'] <= max_distance_cutoff]
 
+# Estrae l'ultimo stato registrato per ogni MAC Address
 recent_devices = df.groupby(col_mac).last().reset_index()
 
 def get_status_dot(evt):
@@ -156,7 +157,7 @@ active_alarms = sum(1 for e in recent_devices[col_event].astype(str) if "ENTRATO
 last_update = str(df[col_time].iloc[-1]) if col_time and not df.empty else "--"
 
 k1.metric("Stato Perimetro", "🔴 INTRUSIONE" if active_alarms > 0 else "🟢 SICURO")
-k2.metric("Dispositivi Attivi", f"🔵 {len(recent_devices)}")
+k2.metric("Dispositivi Totali", f"🔵 {len(recent_devices)}")
 k3.metric("Eventi Critici", f"🔴 {active_alarms}")
 k4.metric("Ultimo Log", last_update)
 
@@ -166,11 +167,15 @@ tab_map, tab_table = st.tabs(["🗺️ Radar Planimetria Interactive", "📋 Reg
 with tab_map:
     fig = go.Figure()
 
+    # Determinazione raggio massimo dinamico per la mappa
+    max_r = max(15.0, recent_devices['dist_clean'].max() + 2.0) if not recent_devices.empty else 15.0
+
     # Cerchi concentrici Radar
-    for r in [2, 4, 6, 8, 10, 12, 14]:
-        fig.add_shape(type="circle", x0=5-r, y0=5-r, x1=5+r, y1=5+r,
+    for r in np.arange(2.0, max_r, 3.0):
+        r_val = round(r, 1)
+        fig.add_shape(type="circle", x0=5-r_val, y0=5-r_val, x1=5+r_val, y1=5+r_val,
                       line=dict(color="rgba(255, 255, 255, 0.12)", width=1, dash="dot"))
-        fig.add_annotation(x=5, y=5+r, text=f"{r}m", showarrow=False, 
+        fig.add_annotation(x=5, y=5+r_val, text=f"{r_val}m", showarrow=False, 
                            font=dict(color="rgba(255,255,255,0.4)", size=10), yanchor="bottom")
 
     # Plot dello Scanner
@@ -187,7 +192,6 @@ with tab_map:
 
     target_x, target_y, target_texts, point_labels, marker_colors, marker_sizes = [], [], [], [], [], []
 
-    # Angolo incrementale per distribuire uniformemente i 30 dispositivi in cerchio alla loro distanza
     num_devs = len(recent_devices)
     angles = np.linspace(0, 2 * np.pi, num_devs, endpoint=False) if num_devs > 0 else []
 
@@ -205,7 +209,7 @@ with tab_map:
                 dot_icon = DOT_MAP[key]
                 break
 
-        # Calcolo posizione circolare distinta per ciascun dispositivo
+        # Calcolo coordinata circolare univoca per tutti i dispositivi
         angle = angles[idx]
         calc_x = sc_x + (dist * np.cos(angle))
         calc_y = sc_y + (dist * np.sin(angle))
@@ -213,9 +217,9 @@ with tab_map:
         target_x.append(calc_x)
         target_y.append(calc_y)
         marker_colors.append(color)
-        marker_sizes.append(16 if "ENTRATO" in evt_str else 12)
+        marker_sizes.append(14 if "ENTRATO" in evt_str else 10)
         
-        point_labels.append(name_str)
+        point_labels.append(f"{dot_icon} {name_str if pd.notna(name_str) and name_str != 'nan' else mac_str}")
 
         target_texts.append(
             f"<b>Dispositivo:</b> {name_str}<br>"
@@ -224,7 +228,7 @@ with tab_map:
             f"<b>Distanza:</b> {dist:.2f} m"
         )
 
-    # Disegna i 30 pallini colorati ben visibili sulla mappa
+    # Rendering dei dispositivi nel Radar
     if target_x:
         fig.add_trace(go.Scatter(
             x=target_x,
@@ -233,21 +237,22 @@ with tab_map:
             marker=dict(
                 size=marker_sizes, 
                 color=marker_colors, 
-                opacity=0.95, 
-                line=dict(width=1.5, color='#ffffff')
+                opacity=0.9, 
+                line=dict(width=1, color='#ffffff')
             ),
             text=point_labels,
             textposition="top center",
-            textfont=dict(color="#ffffff", size=10),
+            textfont=dict(color="#ffffff", size=9),
             hovertext=target_texts,
             hoverinfo='text',
             name='Dispositivi BLE'
         ))
 
+    pad = max_r + 2.0
     fig.update_layout(
-        xaxis=dict(range=[-10, 20], showgrid=False, zeroline=False, visible=False),
-        yaxis=dict(range=[-10, 20], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
-        height=700,
+        xaxis=dict(range=[5 - pad, 5 + pad], showgrid=False, zeroline=False, visible=False),
+        yaxis=dict(range=[5 - pad, 5 + pad], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
+        height=750,
         margin=dict(l=10, r=10, t=10, b=10),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
