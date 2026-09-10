@@ -116,7 +116,7 @@ st.sidebar.header("⚙️ Configurazione Centralino")
 
 filter_night_hours = st.sidebar.checkbox("Escludi rilevazioni 00:00 - 04:00", value=True)
 exclude_static_macs = st.sidebar.checkbox("Escludi MAC STATICI", value=False)
-exclude_specific_mac = st.sidebar.checkbox("Escludi MAC specifico (de:cd:2f:73:96:d3)", value=True)
+exclude_specific_macs = st.sidebar.checkbox("Escludi MAC specifici (Lista Nera)", value=True)
 
 # Applicazione filtro orario (00:00 - 04:00)
 if filter_night_hours and col_time is not None:
@@ -127,10 +127,22 @@ if filter_night_hours and col_time is not None:
 if exclude_static_macs:
     df = df[df[col_mac].apply(is_random_mac)]
 
-# Applicazione filtro Esclusione MAC specifico (de:cd:2f:73:96:d3)
-if exclude_specific_mac and col_mac is not None:
-    target_mac_clean = "de:cd:2f:73:96:d3".replace("-", ":").lower()
-    df = df[df[col_mac].astype(str).str.replace("-", ":").str.lower() != target_mac_clean]
+# Applicazione filtro Esclusione MAC specifici
+if exclude_specific_macs and col_mac is not None:
+    blacklisted_macs = {
+        "52:c5:37:97:ce:18",
+        "d8:85:ac:aa:11:b0",
+        "de:cd:2f:73:96:d3",
+        "dc:cd:2f:73:96:d3", # Gestione eventuale c/d iniziale
+        "8c:4f:00:e0:95:12",
+        "4c:a9:19:e2:71:b5",
+        "d4:e9:f4:e9:53:d8"
+    }
+    # Normalizza la lista dei MAC da escludere
+    blacklisted_clean = {m.replace("-", ":").lower() for m in blacklisted_macs}
+    
+    # Filtra via i MAC presenti nella lista nera
+    df = df[~df[col_mac].astype(str).str.replace("-", ":").str.lower().isin(blacklisted_clean)]
 
 recent_devices = df.groupby(col_mac).last().reset_index()
 
@@ -285,11 +297,9 @@ with tab_table:
 with tab_new_mac:
     st.subheader("🏷️ Tabella Nuovi MAC Rilevati (Eventi di Ingresso)")
     if not df.empty and col_event is not None:
-        # Filtra i log che contengono l'evento di ingresso
         new_entries_df = df[df[col_event].astype(str).str.upper().str.contains("ENTRATO")].copy()
         
         if not new_entries_df.empty:
-            # Mostra la prima apparizione o tutti gli eventi di ingresso unificati per MAC
             new_entries_df['status_formatted'] = new_entries_df[col_event].apply(get_status_dot)
             cols_to_show = [c for c in [col_time, col_name, col_mac, col_dist, col_event] if c is not None]
             
