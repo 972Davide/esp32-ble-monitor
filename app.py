@@ -80,7 +80,6 @@ def load_data(url):
     except Exception:
         return pd.DataFrame()
 
-# Funzione per identificare i MAC casuali / randomizzati
 def is_random_mac(mac):
     try:
         first_byte = int(str(mac).replace("-", ":").split(':')[0], 16)
@@ -132,8 +131,9 @@ recent_devices = df.groupby(col_mac).last().reset_index()
 mac_list = sorted(recent_devices[col_mac].dropna().astype(str).unique().tolist()) if not recent_devices.empty else []
 my_mac = st.sidebar.selectbox("Seleziona il TUO MAC (Centro Radar):", mac_list) if mac_list else ""
 
+# Scala massima arrotondata al multiplo di 5 superiore (minimo 10m)
 max_detected = recent_devices['dist_clean'].max() if not recent_devices.empty else 5.0
-radar_max_scale = float(max(5.0, np.ceil(max_detected)))
+radar_max_scale = float(max(10.0, np.ceil(max_detected / 5.0) * 5.0))
 
 def get_status_dot(evt):
     evt_upper = str(evt).upper()
@@ -158,16 +158,17 @@ tab_map, tab_table = st.tabs(["🗺️ Radar Planimetria Interactive", "📋 Reg
 with tab_map:
     fig = go.Figure()
 
-    step = 1.0 if radar_max_scale <= 10 else 2.0
+    # Anelli concentrici ogni 5 metri (0, 5, 10, 15...)
+    step = 5.0
     for r in np.arange(step, radar_max_scale + 0.1, step):
         fig.add_shape(
             type="circle", 
             x0=-r, y0=-r, x1=r, y1=r,
-            line=dict(color="rgba(255, 255, 255, 0.2)", width=1, dash="dot")
+            line=dict(color="rgba(255, 255, 255, 0.25)", width=1, dash="dot")
         )
         fig.add_annotation(
-            x=0, y=r, text=f"{int(r) if r.is_integer() else r}m", showarrow=False, 
-            font=dict(color="rgba(255,255,255,0.5)", size=10), yanchor="bottom"
+            x=0, y=r, text=f"{int(r)}m", showarrow=False, 
+            font=dict(color="rgba(255,255,255,0.6)", size=11), yanchor="bottom"
         )
 
     my_device_row = recent_devices[recent_devices[col_mac].astype(str) == str(my_mac)] if my_mac else pd.DataFrame()
@@ -245,7 +246,7 @@ with tab_map:
             name='Dispositivi BLE'
         ))
 
-    pad = radar_max_scale + 0.5
+    pad = radar_max_scale + 1.0
     fig.update_layout(
         xaxis=dict(range=[-pad, pad], showgrid=False, zeroline=False, visible=False),
         yaxis=dict(range=[-pad, pad], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
