@@ -44,8 +44,6 @@ st.title("📡 BLE Intrusion Detection & Tactical Radar")
 
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQfyw4jBL1NZwI9KC4KaYEIVzcJPBOfabbBgBdF0j35liabae4rn0NbYU2lrY6-4NYsEY-MFaP0OSl8/pub?output=csv"
 
-SCANNER_POS = {"Scanner_1": (0.0, 0.0)}
-
 COLOR_MAP = {
     "ENTRATO": "#ef4444",   # Rosso
     "PRESENTE": "#f59e0b",  # Giallo
@@ -62,7 +60,6 @@ DOT_MAP = {
     "SCONOSCIUTO": "⚪"
 }
 
-# --- FUNZIONE PARSER DISTANZA (Corretta e Limitate) ---
 def parse_distance(val):
     if pd.isna(val):
         return 2.0
@@ -71,26 +68,10 @@ def parse_distance(val):
     if numbers:
         floats = [float(n) for n in numbers]
         avg = sum(floats) / len(floats)
-        # Se il numero estratto è anomalo (> 15m), lo scala proporzionalmente
-        if avg > 15:
+        if avg > 20:
             avg = 10.0 + (avg % 5)
-        return max(avg, 1.0)
+        return max(avg, 0.5)
     return 2.0
-
-# --- BARRA LATERALE ---
-st.sidebar.header("⚙️ Filtri & Configurazione")
-filter_random_mac = st.sidebar.checkbox("Nascondi MAC casuali/temporanei", value=False)
-radar_max_scale = st.sidebar.slider("Scala Massima Radar (m)", 5.0, 20.0, 10.0)
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("🔴 Legenda Stati")
-st.sidebar.markdown("""
-* 🔴 **ENTRATO** - Allarme Intrusione
-* 🟡 **PRESENTE** - Rilevato in zona
-* 🔵 **SPOSTATO** - In movimento
-* 🟢 **USCITO** - Fuori perimetro
-* ⚪ **ALTRO** - Non definito
-""")
 
 @st.cache_data(ttl=2)
 def load_data(url):
@@ -132,10 +113,19 @@ col_event = find_col(['event', 'stato', 'status', 'allarme'], 4)
 df = df_raw.copy()
 df['dist_clean'] = df[col_dist].apply(parse_distance)
 
-if filter_random_mac:
-    df = df[~df[col_mac].apply(is_random_mac)]
-
 recent_devices = df.groupby(col_mac).last().reset_index()
+
+# --- BARRA LATERALE ---
+st.sidebar.header("⚙️ Configurazione Centralino")
+
+mac_list = sorted(recent_devices[col_mac].dropna().astype(str).unique().tolist())
+my_mac = st.sidebar.selectbox("Seleziona il TUO MAC Address (Centro Radar):", mac_list)
+
+filter_random_mac = st.sidebar.checkbox("Nascondi MAC casuali/temporanei", value=False)
+radar_max_scale = st.sidebar.slider("Scala Massima Radar (m)", 5.0, 25.0, 12.0)
+
+if filter_random_mac:
+    recent_devices = recent_devices[~recent_devices[col_mac].apply(is_random_mac)]
 
 def get_status_dot(evt):
     evt_upper = str(evt).upper()
@@ -144,13 +134,13 @@ def get_status_dot(evt):
             return f"{dot} {evt_upper}"
     return f"⚪ {evt_upper}"
 
-# --- METRICHE E KPI ---
+# --- METRICHE ---
 k1, k2, k3, k4 = st.columns(4)
 active_alarms = sum(1 for e in recent_devices[col_event].astype(str) if "ENTRATO" in e.upper())
 last_update = str(df[col_time].iloc[-1]) if col_time and not df.empty else "--"
 
 k1.metric("Stato Perimetro", "🔴 INTRUSIONE" if active_alarms > 0 else "🟢 SICURO")
-k2.metric("Dispositivi Rilevati", f"🔵 {len(recent_devices)}")
+k2.metric("Dispositivi Totali", f"🔵 {len(recent_devices)}")
 k3.metric("Eventi Critici", f"🔴 {active_alarms}")
 k4.metric("Ultimo Log", last_update)
 
@@ -160,42 +150,47 @@ tab_map, tab_table = st.tabs(["🗺️ Radar Planimetria Interactive", "📋 Reg
 with tab_map:
     fig = go.Figure()
 
-    sc_x, sc_y = SCANNER_POS["Scanner_1"]
+    # Centro fisso all'origine (0, 0)
+    sc_x, sc_y = 0.0, 0.0
 
-    # Cerchi del radar con passo di 2 metri fino alla scala massima scelta
+    # Cerchi del radar
     step = 2.0
     for r in np.arange(step, radar_max_scale + 0.1, step):
         fig.add_shape(
             type="circle", 
-            x0=sc_x - r, y0=sc_y - r, x1=sc_x + r, y1=sc_y + r,
+            x0=-r, y0=-r, x1=r, y1=r,
             line=dict(color="rgba(255, 255, 255, 0.15)", width=1, dash="dot")
         )
         fig.add_annotation(
-            x=sc_x, y=sc_y + r, text=f"{int(r)}m", showarrow=False, 
+            x=0, y=r, text=f"{int(r)}m", showarrow=False, 
             font=dict(color="rgba(255,255,255,0.4)", size=10), yanchor="bottom"
         )
 
-    # Marker dello Scanner al centro
+    # Separa il tuo MAC dagli altri dispositivi
+    my_device_row = recent_devices[recent_devices[col_mac].astype(str) == str(my_mac)]
+    other_devices = recent_devices[recent_devices[col_mac].astype(str) != str(my_mac)]
+
+    my_name = my_device_row[col_name].values[0] if not my_device_row.empty and pd.notna(my_device_row[col_name].values[0]) else my_mac
+
+    # Disegna il TUO MAC perfettamente al centro
     fig.add_trace(go.Scatter(
-        x=[sc_x], y=[sc_y],
+        x=[0], y=[0],
         mode='markers+text',
-        marker=dict(size=20, color='#38bdf8', symbol='diamond', line=dict(color='white', width=2)),
-        text=["<b>Scanner_1</b>"],
+        marker=dict(size=22, color='#38bdf8', symbol='diamond', line=dict(color='white', width=2)),
+        text=[f"<b>TU ({my_name})</b>"],
         textposition="top center",
         hoverinfo='text',
-        name="Scanner_1"
+        hovertext=f"<b>IL TUO DISPOSITIVO</b><br>MAC: {my_mac}",
+        name="Mio Dispositivo"
     ))
 
     target_x, target_y, target_texts, point_labels, marker_colors, marker_sizes = [], [], [], [], [], []
 
-    # Disposizione dei dispositivi
-    num_devs = len(recent_devices)
-    if num_devs > 0:
-        # Sfalsa uniformemente gli angoli per rendere tutti i dispositivi ben leggibili
-        angles = np.linspace(0, 2 * np.pi, num_devs, endpoint=False)
-        
-        for idx, (_, row) in enumerate(recent_devices.iterrows()):
-            # La distanza non supera mai la scala radiale visibile
+    num_others = len(other_devices)
+    if num_others > 0:
+        angles = np.linspace(0, 2 * np.pi, num_others, endpoint=False)
+
+        for idx, (_, row) in enumerate(other_devices.iterrows()):
             dist = min(float(row['dist_clean']), radar_max_scale - 0.5)
             evt_str = str(row[col_event]).upper()
             mac_str = str(row[col_mac])
@@ -210,8 +205,8 @@ with tab_map:
                     break
 
             angle = angles[idx]
-            calc_x = sc_x + (dist * np.cos(angle))
-            calc_y = sc_y + (dist * np.sin(angle))
+            calc_x = dist * np.cos(angle)
+            calc_y = dist * np.sin(angle)
 
             target_x.append(calc_x)
             target_y.append(calc_y)
@@ -225,7 +220,7 @@ with tab_map:
                 f"<b>Dispositivo:</b> {name_str}<br>"
                 f"<b>MAC:</b> {mac_str}<br>"
                 f"<b>Stato:</b> {dot_icon} {evt_str}<br>"
-                f"<b>Distanza:</b> {row['dist_clean']:.2f} m"
+                f"<b>Distanza da te:</b> {row['dist_clean']:.2f} m"
             )
 
     if target_x:
