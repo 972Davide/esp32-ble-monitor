@@ -1,9 +1,14 @@
+
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import numpy as np
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Monitoraggio BLE Casa", layout="wide")
+
+# --- AUTO-REFRESH OGNI 5 SECONDI (5000 ms) ---
+st_autorefresh(interval=5000, limit=None, key="ble_monitor_refresh")
 
 st.title("📡 Monitoraggio Presenze BLE Multi-Nodo - Planimetria Real-Time")
 
@@ -12,11 +17,11 @@ SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQfyw4jBL1NZwI9
 
 # Posizioni fisse dei due scanner sulla mappa (X, Y in metri)
 SCANNER_POS = {
-    "Scanner_1": (10.0, 0.0),  # Ingresso Casa
-    "Scanner_2": (0.0, 10.0)   # Lato Opposto / Interno
+    "Scanner_1": (10.0, 0.0),   # Ingresso Casa
+    "Scanner_2": (0.0, 10.0)    # Lato Opposto / Interno
 }
 
-@st.cache_data(ttl=3)
+@st.cache_data(ttl=2)
 def load_data():
     try:
         df = pd.read_csv(SHEET_CSV_URL)
