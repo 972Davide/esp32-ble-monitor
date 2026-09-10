@@ -49,7 +49,6 @@ SCANNER_POS = {
     "Scanner_1": (5.0, 5.0)
 }
 
-# Mappatura dei colori e dei pallini simbolici
 COLOR_MAP = {
     "ENTRATO": "#ef4444",   # Rosso allarme
     "PRESENTE": "#f59e0b",  # Giallo avviso
@@ -71,7 +70,6 @@ st.sidebar.header("⚙️ Filtri & Configurazione")
 filter_random_mac = st.sidebar.checkbox("Nascondi MAC casuali/temporanei", value=True)
 max_distance_cutoff = st.sidebar.slider("Distanza Massima Radar (m)", 1.0, 20.0, 10.0)
 
-# Legenda pallini in sidebar
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔴 Legenda Stati")
 st.sidebar.markdown("""
@@ -106,7 +104,7 @@ if df_raw.empty:
     st.error("⚠️ Impossibile caricare i dati dal Google Sheet. Verifica l'URL o la connessione.")
     st.stop()
 
-# Mappatura tollerante delle colonne
+# Mappatura colonne
 cols_lower = [c.lower() for c in df_raw.columns]
 
 def find_col(keywords, default_idx):
@@ -121,7 +119,7 @@ col_mac = find_col(['mac', 'address', 'indirizzo'], 2)
 col_dist = find_col(['dist', 'rssi', 'metri'], 3)
 col_event = find_col(['event', 'stato', 'status', 'allarme'], 4)
 
-# Conversione e pulizia tipi
+# Conversione e pulizia
 df = df_raw.copy()
 df[col_dist] = pd.to_numeric(df[col_dist].astype(str).str.replace(',', '.'), errors='coerce').fillna(0.0)
 
@@ -130,10 +128,8 @@ if filter_random_mac:
 
 df = df[df[col_dist] <= max_distance_cutoff]
 
-# Estrazione ultimo evento per ciascun dispositivo
 recent_devices = df.groupby(col_mac).last().reset_index()
 
-# Assistente per attribuire il pallino corrispondente allo stato
 def get_status_dot(evt):
     evt_upper = str(evt).upper()
     for key, dot in DOT_MAP.items():
@@ -176,7 +172,7 @@ with tab_map:
         name="Scanner_1"
     ))
 
-    target_x, target_y, target_texts, colors, marker_sizes = [], [], [], [], []
+    target_x, target_y, target_texts, point_labels, colors, marker_sizes = [], [], [], [], [], []
     np.random.seed(42)
 
     for _, row in recent_devices.iterrows():
@@ -202,6 +198,9 @@ with tab_map:
         target_y.append(calc_y)
         colors.append(color)
         marker_sizes.append(18 if "ENTRATO" in evt_str else 12)
+        
+        # Etichetta visibile sulla mappa con il pallino ed il nome dispositivo
+        point_labels.append(f"{dot_icon} {name_str}")
 
         target_texts.append(
             f"<b>Dispositivo:</b> {name_str}<br>"
@@ -210,13 +209,16 @@ with tab_map:
             f"<b>Distanza:</b> {dist:.2f} m"
         )
 
-    # Dispositivi rilevati sul Radar
+    # Dispositivi rilevati sul Radar (ora con mode='markers+text' per mostrare i pallini/nomi)
     if target_x:
         fig.add_trace(go.Scatter(
             x=target_x,
             y=target_y,
-            mode='markers',
+            mode='markers+text',
             marker=dict(size=marker_sizes, color=colors, opacity=0.9, line=dict(width=1.5, color='#ffffff')),
+            text=point_labels,
+            textposition="top center",
+            textfont=dict(color="#ffffff", size=11),
             hovertext=target_texts,
             hoverinfo='text',
             name='Dispositivi BLE'
@@ -237,7 +239,6 @@ with tab_map:
 with tab_table:
     st.subheader("📋 Registro Dettagliato Dispositivi")
     
-    # Formattazione della colonna Stato con i pallini
     display_df = recent_devices.copy()
     display_df[col_event] = display_df[col_event].apply(get_status_dot)
     
