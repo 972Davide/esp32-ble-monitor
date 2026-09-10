@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -254,6 +253,7 @@ with tab_map:
             target_texts.append(
                 f"<b>Dispositivo:</b> {name_str}<br>"
                 f"<b>MAC:</b> {mac_str}<br>"
+                f"<b>IP:</b> 192.168.1.21 (Selezionato)<br>"
                 f"<b>Stato:</b> {dot_icon} {evt_str}<br>"
                 f"<b>Distanza:</b> {r_dist:.2f} m<br>"
                 f"<b>TX Power:</b> {tx_val} dBm<br>"
@@ -346,9 +346,10 @@ with tab_target_mac:
         
         st.markdown("---")
         
-        c_info1, c_info2 = st.columns(2)
+        c_info1, c_info2, c_info3 = st.columns(3)
         c_info1.info(f"**MAC Address:** `{TARGET_MAC}`")
-        c_info2.info(f"**TX Power:** `{t_tx}` dBm | **Service UUID:** `{t_uuid}`")
+        c_info2.info(f"**Indirizzo IP:** `192.168.1.21`")
+        c_info3.info(f"**TX Power:** `{t_tx}` dBm | **UUID:** `{t_uuid}`")
         
         st.markdown("### 📈 Storico Distanza")
         if col_time is not None and not df_target_history.empty:
@@ -374,7 +375,7 @@ with tab_target_mac:
             )
             st.plotly_chart(fig_target, use_container_width=True)
             
-        st.markdown("### 🕒 Tabella Eventi del Galaxy-A52")
+        st.markdown("### 🕒 Tabella Eventi del Galaxy-A52 (IP: 192.168.1.21)")
         display_target_df = df_target_history.copy()
         display_target_df[col_event] = display_target_df[col_event].apply(get_status_dot)
         cols_target_show = [c for c in [col_time, col_name, col_mac, col_dist, col_tx, col_uuid, col_event] if c is not None]
@@ -385,4 +386,4 @@ with tab_target_mac:
             height=300
         )
     else:
-        st.warning(f"Nessun dato registrato o trovato nel Google Sheet per il MAC `{TARGET_MAC}` (Galaxy-A52).")
+        st.warning(f"Nessun dato registrato o trovato nel Google Sheet per il MAC `{TARGET_MAC}` (Galaxy-A52 associato a IP `192.168.1.21`).")
