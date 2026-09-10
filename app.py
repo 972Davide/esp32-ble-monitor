@@ -107,6 +107,8 @@ col_name = find_col(['nam', 'nom', 'dev'], 1)
 col_mac = find_col(['mac', 'address', 'indirizzo'], 2)
 col_dist = find_col(['dist', 'rssi', 'metri'], 3)
 col_event = find_col(['event', 'stato', 'status', 'allarme'], 4)
+col_tx = find_col(['tx', 'power'], 5)
+col_uuid = find_col(['uuid', 'service'], 6)
 
 df = df_raw.copy()
 df['dist_clean'] = df[col_dist].apply(parse_distance)
@@ -133,15 +135,12 @@ if exclude_specific_macs and col_mac is not None:
         "52:c5:37:97:ce:18",
         "d8:85:ac:aa:11:b0",
         "de:cd:2f:73:96:d3",
-        "dc:cd:2f:73:96:d3", # Gestione eventuale c/d iniziale
+        "dc:cd:2f:73:96:d3",
         "8c:4f:00:e0:95:12",
         "4c:a9:19:e2:71:b5",
         "d4:e9:f4:e9:53:d8"
     }
-    # Normalizza la lista dei MAC da escludere
     blacklisted_clean = {m.replace("-", ":").lower() for m in blacklisted_macs}
-    
-    # Filtra via i MAC presenti nella lista nera
     df = df[~df[col_mac].astype(str).str.replace("-", ":").str.lower().isin(blacklisted_clean)]
 
 recent_devices = df.groupby(col_mac).last().reset_index()
@@ -149,7 +148,6 @@ recent_devices = df.groupby(col_mac).last().reset_index()
 mac_list = sorted(recent_devices[col_mac].dropna().astype(str).unique().tolist()) if not recent_devices.empty else []
 my_mac = st.sidebar.selectbox("Seleziona il TUO MAC (Centro Radar):", mac_list) if mac_list else ""
 
-# Scala massima arrotondata al multiplo di 5 superiore (minimo 10m)
 max_detected = recent_devices['dist_clean'].max() if not recent_devices.empty else 5.0
 radar_max_scale = float(max(10.0, np.ceil(max_detected / 5.0) * 5.0))
 
@@ -180,7 +178,6 @@ tab_map, tab_table, tab_new_mac = st.tabs([
 with tab_map:
     fig = go.Figure()
 
-    # Anelli concentrici ogni 5 metri (0, 5, 10, 15...)
     step = 5.0
     for r in np.arange(step, radar_max_scale + 0.1, step):
         fig.add_shape(
@@ -198,7 +195,6 @@ with tab_map:
 
     my_name = my_device_row[col_name].values[0] if not my_device_row.empty and pd.notna(my_device_row[col_name].values[0]) else my_mac
 
-    # Dispositivo Centrale (TU)
     fig.add_trace(go.Scatter(
         x=[0], y=[0],
         mode='markers+text',
@@ -221,6 +217,8 @@ with tab_map:
             evt_str = str(row[col_event]).upper()
             mac_str = str(row[col_mac])
             name_str = str(row[col_name])
+            tx_val = row.get(col_tx, 'N/D') if col_tx and col_tx in row else 'N/D'
+            uuid_val = row.get(col_uuid, 'N/D') if col_uuid and col_uuid in row else 'N/D'
 
             dot_icon = "⚪"
             color = COLOR_MAP["SCONOSCIUTO"]
@@ -246,7 +244,9 @@ with tab_map:
                 f"<b>Dispositivo:</b> {name_str}<br>"
                 f"<b>MAC:</b> {mac_str}<br>"
                 f"<b>Stato:</b> {dot_icon} {evt_str}<br>"
-                f"<b>Distanza Reale:</b> {r_dist:.2f} m"
+                f"<b>Distanza:</b> {r_dist:.2f} m<br>"
+                f"<b>TX Power:</b> {tx_val} dBm<br>"
+                f"<b>Service UUID:</b> {uuid_val}"
             )
 
     if target_x:
@@ -286,7 +286,7 @@ with tab_table:
     display_df = recent_devices.copy()
     if not display_df.empty:
         display_df[col_event] = display_df[col_event].apply(get_status_dot)
-        cols_to_show = [c for c in [col_time, col_name, col_mac, col_dist, col_event] if c is not None]
+        cols_to_show = [c for c in [col_time, col_name, col_mac, col_dist, col_tx, col_uuid, col_event] if c is not None]
         
         st.dataframe(
             display_df[cols_to_show].sort_values(by=col_dist, ascending=True),
@@ -301,7 +301,7 @@ with tab_new_mac:
         
         if not new_entries_df.empty:
             new_entries_df['status_formatted'] = new_entries_df[col_event].apply(get_status_dot)
-            cols_to_show = [c for c in [col_time, col_name, col_mac, col_dist, col_event] if c is not None]
+            cols_to_show = [c for c in [col_time, col_name, col_mac, col_dist, col_tx, col_uuid, col_event] if c is not None]
             
             st.dataframe(
                 new_entries_df[cols_to_show].drop_duplicates(subset=[col_mac]).sort_values(by=col_time, ascending=False),
