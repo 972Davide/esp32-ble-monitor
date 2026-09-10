@@ -113,6 +113,14 @@ col_uuid = find_col(['uuid', 'service'], 6)
 df = df_raw.copy()
 df['dist_clean'] = df[col_dist].apply(parse_distance)
 
+# Forziamo il nome corretto per il Galaxy A52s-5G se il campo nome è vuoto o generico
+TARGET_MAC = "12:6e:91:f8:2d:fa"
+target_clean_mac = TARGET_MAC.replace("-", ":").lower()
+
+if col_name is not None and col_mac is not None:
+    mask_target = df[col_mac].astype(str).str.replace("-", ":").str.lower() == target_clean_mac
+    df.loc[mask_target, col_name] = "Galaxy-A52s-5G"
+
 # --- FILTRI NELLA BARRA LATERALE ---
 st.sidebar.header("⚙️ Configurazione Centralino")
 
@@ -129,8 +137,7 @@ if filter_night_hours and col_time is not None:
 if exclude_static_macs:
     df = df[df[col_mac].apply(is_random_mac)]
 
-# Applicazione filtro Esclusione MAC specifici (ma escludiamo il MAC speciale dalla blacklist per sicurezza)
-TARGET_MAC = "12:6e:91:f8:2d:fa"
+# Applicazione filtro Esclusione MAC specifici (mantenendo immune il target)
 if exclude_specific_macs and col_mac is not None:
     blacklisted_macs = {
         "52:c5:37:97:ce:18",
@@ -174,7 +181,7 @@ tab_map, tab_table, tab_new_mac, tab_target_mac = st.tabs([
     "🗺️ Radar Planimetria Interactive", 
     "📋 Registro Dati Dettagliato", 
     "🏷️ Tabella Nuovi MAC",
-    f"🎯 Target ({TARGET_MAC})"
+    "📱 Galaxy-A52s-5G (Target)"
 ])
 
 with tab_map:
@@ -316,36 +323,32 @@ with tab_new_mac:
         st.warning("Dati non disponibili per popolare la tabella dei nuovi MAC.")
 
 with tab_target_mac:
-    st.subheader(f"🎯 Pannello Dedicato al Dispositivo: `{TARGET_MAC}`")
+    st.subheader("📱 Monitoraggio Mirato: Galaxy-A52s-5G")
     
-    # Filtriamo tutto il dataframe storico per questo specifico MAC (ignorando maiuscole/minuscole o trattini)
-    target_clean_mac = TARGET_MAC.replace("-", ":").lower()
     df_target_history = df[df[col_mac].astype(str).str.replace("-", ":").str.lower() == target_clean_mac].copy()
     
     if not df_target_history.empty:
-        # Ultimo stato noto del target
         latest_target_row = df_target_history.iloc[-1]
-        t_name = latest_target_row.get(col_name, "Sconosciuto")
+        t_name = latest_target_row.get(col_name, "Galaxy-A52s-5G")
         t_dist = latest_target_row.get('dist_clean', 0.0)
         t_event = latest_target_row.get(col_event, "N/D")
         t_tx = latest_target_row.get(col_tx, "N/D")
         t_uuid = latest_target_row.get(col_uuid, "N/D")
         t_time = latest_target_row.get(col_time, "N/D")
         
-        # Metriche in evidenza per il target
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Nome Dispositivo", str(t_name))
+        m1.metric("Nome", str(t_name))
         m2.metric("Distanza Attuale", f"{t_dist:.2f} m")
-        m3.metric("Stato Ultimo Rilevamento", str(t_event))
-        m4.metric("Ultima Seen", str(t_time))
+        m3.metric("Ultimo Stato", str(t_event))
+        m4.metric("Ultimo Rilevamento", str(t_time))
         
         st.markdown("---")
         
         c_info1, c_info2 = st.columns(2)
-        c_info1.info(f"**TX Power configurato:** `{t_tx}` dBm")
-        c_info2.info(f"**Service UUID:** `{t_uuid}`")
+        c_info1.info(f"**MAC Address:** `{TARGET_MAC}`")
+        c_info2.info(f"**TX Power:** `{t_tx}` dBm | **Service UUID:** `{t_uuid}`")
         
-        st.markdown("### 📈 Grafico Storico Distanza nel Tempo")
+        st.markdown("### 📈 Storico Distanza")
         if col_time is not None and not df_target_history.empty:
             df_target_history['parsed_time'] = pd.to_datetime(df_target_history[col_time], errors='coerce')
             df_target_history = df_target_history.sort_values('parsed_time')
@@ -369,7 +372,7 @@ with tab_target_mac:
             )
             st.plotly_chart(fig_target, use_container_width=True)
             
-        st.markdown("### 🕒 Storico Eventi di questo MAC")
+        st.markdown("### 🕒 Tabella Eventi del Galaxy-A52s-5G")
         display_target_df = df_target_history.copy()
         display_target_df[col_event] = display_target_df[col_event].apply(get_status_dot)
         cols_target_show = [c for c in [col_time, col_name, col_mac, col_dist, col_tx, col_uuid, col_event] if c is not None]
@@ -380,4 +383,4 @@ with tab_target_mac:
             height=300
         )
     else:
-        st.warning(f"Nessun dato registrato o trovato nel Google Sheet per il MAC `{TARGET_MAC}`.")
+        st.warning(f"Nessun dato registrato o trovato nel Google Sheet per il MAC `{TARGET_MAC}` (Galaxy-A52s-5G).")
