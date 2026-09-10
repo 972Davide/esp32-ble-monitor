@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -81,9 +80,11 @@ def load_data(url):
     except Exception:
         return pd.DataFrame()
 
+# Funzione per identificare i MAC casuali / randomizzati (indirizzi locali)
 def is_random_mac(mac):
     try:
         first_byte = int(str(mac).replace("-", ":").split(':')[0], 16)
+        # Il secondo bit meno significativo del primo byte indica un MAC localmente amministrato (randomizzato)
         return bool(first_byte & 2)
     except:
         return False
@@ -112,18 +113,19 @@ col_event = find_col(['event', 'stato', 'status', 'allarme'], 4)
 df = df_raw.copy()
 df['dist_clean'] = df[col_dist].apply(parse_distance)
 
-# --- FILTRO ORARIO (00:00 - 04:00) ---
+# --- FILTRI NELLA BARRA LATERALE ---
 st.sidebar.header("⚙️ Configurazione Centralino")
-filter_night_hours = st.sidebar.checkbox("Escludi rilevazioni 00:00 - 04:00", value=True)
 
+filter_night_hours = st.sidebar.checkbox("Escludi rilevazioni 00:00 - 04:00", value=True)
+only_static_macs = st.sidebar.checkbox("Mostra solo MAC STATICI", value=False)
+
+# Applicazione filtro orario (00:00 - 04:00)
 if filter_night_hours and col_time is not None:
-    # Conversione in formato orario per estrarre l'ora di registrazione
     times_parsed = pd.to_datetime(df[col_time], errors='coerce').dt.hour
-    # Mantiene solo i dati registrati al di fuori della fascia 00:00 - 03:59
     df = df[~((times_parsed >= 0) & (times_parsed < 4))]
 
-filter_random_mac = st.sidebar.checkbox("Nascondi MAC casuali/temporanei", value=False)
-if filter_random_mac:
+# Applicazione filtro MAC Statici (esclude i MAC randomizzati se attivo)
+if only_static_macs:
     df = df[~df[col_mac].apply(is_random_mac)]
 
 recent_devices = df.groupby(col_mac).last().reset_index()
@@ -174,7 +176,7 @@ with tab_map:
 
     my_name = my_device_row[col_name].values[0] if not my_device_row.empty and pd.notna(my_device_row[col_name].values[0]) else my_mac
 
-    # Dispositivo Centrale
+    # Dispositivo Centrale (TU)
     fig.add_trace(go.Scatter(
         x=[0], y=[0],
         mode='markers+text',
