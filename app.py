@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import numpy as np
+import re
 from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIGURAZIONE PAGINA ---
@@ -49,6 +50,14 @@ SCANNER_POS = {
     "Scanner_1": (5.0, 5.0)
 }
 
+COLOR_MAP = {
+    "ENTRATO": "#ef4444",   # Rosso allarme
+    "PRESENTE": "#f59e0b",  # Giallo avviso
+    "SPOSTATO": "#06b6d4",  # Ciano dinamico
+    "USCITO": "#10b981",    # Verde sicuro
+    "SCONOSCIUTO": "#6b7280"# Grigio neutro
+}
+
 DOT_MAP = {
     "ENTRATO": "🔴",
     "PRESENTE": "🟡",
@@ -57,10 +66,22 @@ DOT_MAP = {
     "SCONOSCIUTO": "⚪"
 }
 
+# --- FUNZIONE PARSER DISTANZA (Gestisce "5m-7m", "3.5", "5m") ---
+def parse_distance(val):
+    if pd.isna(val):
+        return 1.0
+    val_str = str(val).replace(',', '.')
+    numbers = re.findall(r"[-+]?(?:\d*\.\d+|\d+)", val_str)
+    if numbers:
+        # Se c'è un intervallo es. 5-7, fa la media (6.0), altrimenti prende il numero
+        floats = [float(n) for n in numbers]
+        return sum(floats) / len(floats)
+    return 1.0
+
 # --- BARRA LATERALE ---
 st.sidebar.header("⚙️ Filtri & Configurazione")
 filter_random_mac = st.sidebar.checkbox("Nascondi MAC casuali/temporanei", value=True)
-max_distance_cutoff = st.sidebar.slider("Distanza Massima Radar (m)", 1.0, 20.0, 10.0)
+max_distance_cutoff = st.sidebar.slider("Distanza Massima Radar (m)", 1.0, 20.0, 15.0)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔴 Legenda Stati")
@@ -111,12 +132,14 @@ col_dist = find_col(['dist', 'rssi', 'metri'], 3)
 col_event = find_col(['event', 'stato', 'status', 'allarme'], 4)
 
 df = df_raw.copy()
-df[col_dist] = pd.to_numeric(df[col_dist].astype(str).str.replace(',', '.'), errors='coerce').fillna(0.0)
+
+# Conversione robusta della distanza
+df['dist_clean'] = df[col_dist].apply(parse_distance)
 
 if filter_random_mac:
     df = df[~df[col_mac].apply(is_random_mac)]
 
-df = df[df[col_dist] <= max_distance_cutoff]
+df = df[df['dist_clean'] <= max_distance_cutoff]
 
 recent_devices = df.groupby(col_mac).last().reset_index()
 
@@ -144,11 +167,11 @@ with tab_map:
     fig = go.Figure()
 
     # Cerchi concentrici Radar
-    for r in [2, 4, 6, 8, 10]:
+    for r in [2, 4, 6, 8, 10, 12, 14]:
         fig.add_shape(type="circle", x0=5-r, y0=5-r, x1=5+r, y1=5+r,
-                      line=dict(color="rgba(255, 255, 255, 0.1)", width=1, dash="dot"))
+                      line=dict(color="rgba(255, 255, 255, 0.12)", width=1, dash="dot"))
         fig.add_annotation(x=5, y=5+r, text=f"{r}m", showarrow=False, 
-                           font=dict(color="rgba(255,255,255,0.3)", size=10), yanchor="bottom")
+                           font=dict(color="rgba(255,255,255,0.4)", size=10), yanchor="bottom")
 
     # Plot dello Scanner
     sc_x, sc_y = SCANNER_POS["Scanner_1"]
@@ -162,30 +185,37 @@ with tab_map:
         name="Scanner_1"
     ))
 
-    target_x, target_y, target_texts, dot_markers, font_sizes = [], [], [], [], []
-    np.random.seed(42)
+    target_x, target_y, target_texts, point_labels, marker_colors, marker_sizes = [], [], [], [], [], []
 
-    for _, row in recent_devices.iterrows():
-        dist = float(row[col_dist])
+    # Angolo incrementale per distribuire uniformemente i 30 dispositivi in cerchio alla loro distanza
+    num_devs = len(recent_devices)
+    angles = np.linspace(0, 2 * np.pi, num_devs, endpoint=False) if num_devs > 0 else []
+
+    for idx, (_, row) in enumerate(recent_devices.iterrows()):
+        dist = float(row['dist_clean'])
         evt_str = str(row[col_event]).upper()
         mac_str = str(row[col_mac])
         name_str = str(row[col_name])
 
         dot_icon = "⚪"
-        for key in DOT_MAP:
+        color = COLOR_MAP["SCONOSCIUTO"]
+        for key in COLOR_MAP:
             if key in evt_str:
+                color = COLOR_MAP[key]
                 dot_icon = DOT_MAP[key]
                 break
 
-        # Disposizione polare
-        angle = np.random.uniform(0, 2 * np.pi)
+        # Calcolo posizione circolare distinta per ciascun dispositivo
+        angle = angles[idx]
         calc_x = sc_x + (dist * np.cos(angle))
         calc_y = sc_y + (dist * np.sin(angle))
 
         target_x.append(calc_x)
         target_y.append(calc_y)
-        dot_markers.append(f"<b>{dot_icon}</b><br><span style='font-size:10px;'>{name_str}</span>")
-        font_sizes.append(22 if "ENTRATO" in evt_str else 16)
+        marker_colors.append(color)
+        marker_sizes.append(16 if "ENTRATO" in evt_str else 12)
+        
+        point_labels.append(name_str)
 
         target_texts.append(
             f"<b>Dispositivo:</b> {name_str}<br>"
@@ -194,24 +224,30 @@ with tab_map:
             f"<b>Distanza:</b> {dist:.2f} m"
         )
 
-    # Rendering dei pallini emoji sul Radar
+    # Disegna i 30 pallini colorati ben visibili sulla mappa
     if target_x:
         fig.add_trace(go.Scatter(
             x=target_x,
             y=target_y,
-            mode='text',
-            text=dot_markers,
-            textposition="middle center",
-            textfont=dict(size=font_sizes, color='#ffffff'),
+            mode='markers+text',
+            marker=dict(
+                size=marker_sizes, 
+                color=marker_colors, 
+                opacity=0.95, 
+                line=dict(width=1.5, color='#ffffff')
+            ),
+            text=point_labels,
+            textposition="top center",
+            textfont=dict(color="#ffffff", size=10),
             hovertext=target_texts,
             hoverinfo='text',
             name='Dispositivi BLE'
         ))
 
     fig.update_layout(
-        xaxis=dict(range=[-6, 16], showgrid=False, zeroline=False, visible=False),
-        yaxis=dict(range=[-6, 16], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
-        height=650,
+        xaxis=dict(range=[-10, 20], showgrid=False, zeroline=False, visible=False),
+        yaxis=dict(range=[-10, 20], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
+        height=700,
         margin=dict(l=10, r=10, t=10, b=10),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
