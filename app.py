@@ -116,15 +116,21 @@ st.sidebar.header("⚙️ Configurazione Centralino")
 
 filter_night_hours = st.sidebar.checkbox("Escludi rilevazioni 00:00 - 04:00", value=True)
 exclude_static_macs = st.sidebar.checkbox("Escludi MAC STATICI", value=False)
+exclude_specific_mac = st.sidebar.checkbox("Escludi MAC specifico (de:cd:2f:73:96:d3)", value=True)
 
 # Applicazione filtro orario (00:00 - 04:00)
 if filter_night_hours and col_time is not None:
     times_parsed = pd.to_datetime(df[col_time], errors='coerce').dt.hour
     df = df[~((times_parsed >= 0) & (times_parsed < 4))]
 
-# Applicazione filtro Esclusione MAC Statici (mantiene solo i MAC randomizzati)
+# Applicazione filtro Esclusione MAC Statici
 if exclude_static_macs:
     df = df[df[col_mac].apply(is_random_mac)]
+
+# Applicazione filtro Esclusione MAC specifico (de:cd:2f:73:96:d3)
+if exclude_specific_mac and col_mac is not None:
+    target_mac_clean = "de:cd:2f:73:96:d3".replace("-", ":").lower()
+    df = df[df[col_mac].astype(str).str.replace("-", ":").str.lower() != target_mac_clean]
 
 recent_devices = df.groupby(col_mac).last().reset_index()
 
