@@ -158,8 +158,12 @@ k2.metric("Dispositivi Totali", f"🔵 {len(recent_devices)}")
 k3.metric("Eventi Critici", f"🔴 {active_alarms}")
 k4.metric("Ultimo Log", last_update)
 
-# --- TAB RADAR ---
-tab_map, tab_table = st.tabs(["🗺️ Radar Planimetria Interactive", "📋 Registro Dati Dettagliato"])
+# --- TAB APPLICAZIONE ---
+tab_map, tab_table, tab_new_mac = st.tabs([
+    "🗺️ Radar Planimetria Interactive", 
+    "📋 Registro Dati Dettagliato", 
+    "🏷️ Tabella Nuovi MAC"
+])
 
 with tab_map:
     fig = go.Figure()
@@ -277,3 +281,24 @@ with tab_table:
             use_container_width=True,
             height=550
         )
+
+with tab_new_mac:
+    st.subheader("🏷️ Tabella Nuovi MAC Rilevati (Eventi di Ingresso)")
+    if not df.empty and col_event is not None:
+        # Filtra i log che contengono l'evento di ingresso
+        new_entries_df = df[df[col_event].astype(str).str.upper().str.contains("ENTRATO")].copy()
+        
+        if not new_entries_df.empty:
+            # Mostra la prima apparizione o tutti gli eventi di ingresso unificati per MAC
+            new_entries_df['status_formatted'] = new_entries_df[col_event].apply(get_status_dot)
+            cols_to_show = [c for c in [col_time, col_name, col_mac, col_dist, col_event] if c is not None]
+            
+            st.dataframe(
+                new_entries_df[cols_to_show].drop_duplicates(subset=[col_mac]).sort_values(by=col_time, ascending=False),
+                use_container_width=True,
+                height=550
+            )
+        else:
+            st.info("Nessun nuovo dispositivo contrassegnato come 'ENTRATO' trovato nei dati filtrati correnti.")
+    else:
+        st.warning("Dati non disponibili per popolare la tabella dei nuovi MAC.")
