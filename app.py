@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -113,14 +114,14 @@ col_uuid = find_col(['uuid', 'service'], 6)
 df = df_raw.copy()
 df['dist_clean'] = df[col_dist].apply(parse_distance)
 
-# Conversione della colonna nome a stringa e forzatura nome per il Galaxy A52s-5G
-TARGET_MAC = "12:6e:91:f8:2d:fa"
+# Conversione della colonna nome a stringa e forzatura nome per il nuovo MAC target
+TARGET_MAC = "03:e9:c5:2f:f1:b2"
 target_clean_mac = TARGET_MAC.replace("-", ":").lower()
 
 if col_name is not None and col_mac is not None:
     df[col_name] = df[col_name].astype(str)
     mask_target = df[col_mac].astype(str).str.replace("-", ":").str.lower() == target_clean_mac
-    df.loc[mask_target, col_name] = "Galaxy-A52s-5G"
+    df.loc[mask_target, col_name] = "Galaxy-A52"
 
 # --- FILTRI NELLA BARRA LATERALE ---
 st.sidebar.header("⚙️ Configurazione Centralino")
@@ -182,7 +183,7 @@ tab_map, tab_table, tab_new_mac, tab_target_mac = st.tabs([
     "🗺️ Radar Planimetria Interactive", 
     "📋 Registro Dati Dettagliato", 
     "🏷️ Tabella Nuovi MAC",
-    "📱 Galaxy-A52s-5G (Target)"
+    "📱 Galaxy-A52 (Target)"
 ])
 
 with tab_map:
@@ -324,13 +325,13 @@ with tab_new_mac:
         st.warning("Dati non disponibili per popolare la tabella dei nuovi MAC.")
 
 with tab_target_mac:
-    st.subheader("📱 Monitoraggio Mirato: Galaxy-A52s-5G")
+    st.subheader("📱 Monitoraggio Mirato: Galaxy-A52")
     
     df_target_history = df[df[col_mac].astype(str).str.replace("-", ":").str.lower() == target_clean_mac].copy()
     
     if not df_target_history.empty:
         latest_target_row = df_target_history.iloc[-1]
-        t_name = latest_target_row.get(col_name, "Galaxy-A52s-5G")
+        t_name = latest_target_row.get(col_name, "Galaxy-A52")
         t_dist = latest_target_row.get('dist_clean', 0.0)
         t_event = latest_target_row.get(col_event, "N/D")
         t_tx = latest_target_row.get(col_tx, "N/D")
@@ -373,7 +374,7 @@ with tab_target_mac:
             )
             st.plotly_chart(fig_target, use_container_width=True)
             
-        st.markdown("### 🕒 Tabella Eventi del Galaxy-A52s-5G")
+        st.markdown("### 🕒 Tabella Eventi del Galaxy-A52")
         display_target_df = df_target_history.copy()
         display_target_df[col_event] = display_target_df[col_event].apply(get_status_dot)
         cols_target_show = [c for c in [col_time, col_name, col_mac, col_dist, col_tx, col_uuid, col_event] if c is not None]
@@ -384,4 +385,4 @@ with tab_target_mac:
             height=300
         )
     else:
-        st.warning(f"Nessun dato registrato o trovato nel Google Sheet per il MAC `{TARGET_MAC}` (Galaxy-A52s-5G).")
+        st.warning(f"Nessun dato registrato o trovato nel Google Sheet per il MAC `{TARGET_MAC}` (Galaxy-A52).")
