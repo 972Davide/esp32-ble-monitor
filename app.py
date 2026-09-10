@@ -49,14 +49,6 @@ SCANNER_POS = {
     "Scanner_1": (5.0, 5.0)
 }
 
-COLOR_MAP = {
-    "ENTRATO": "#ef4444",   # Rosso allarme
-    "PRESENTE": "#f59e0b",  # Giallo avviso
-    "SPOSTATO": "#06b6d4",  # Ciano dinamico
-    "USCITO": "#10b981",    # Verde sicuro
-    "SCONOSCIUTO": "#6b7280"# Grigio neutro
-}
-
 DOT_MAP = {
     "ENTRATO": "🔴",
     "PRESENTE": "🟡",
@@ -104,7 +96,6 @@ if df_raw.empty:
     st.error("⚠️ Impossibile caricare i dati dal Google Sheet. Verifica l'URL o la connessione.")
     st.stop()
 
-# Mappatura colonne
 cols_lower = [c.lower() for c in df_raw.columns]
 
 def find_col(keywords, default_idx):
@@ -119,7 +110,6 @@ col_mac = find_col(['mac', 'address', 'indirizzo'], 2)
 col_dist = find_col(['dist', 'rssi', 'metri'], 3)
 col_event = find_col(['event', 'stato', 'status', 'allarme'], 4)
 
-# Conversione e pulizia
 df = df_raw.copy()
 df[col_dist] = pd.to_numeric(df[col_dist].astype(str).str.replace(',', '.'), errors='coerce').fillna(0.0)
 
@@ -165,14 +155,14 @@ with tab_map:
     fig.add_trace(go.Scatter(
         x=[sc_x], y=[sc_y],
         mode='markers+text',
-        marker=dict(size=20, color='#38bdf8', symbol='diamond', line=dict(color='white', width=2)),
+        marker=dict(size=22, color='#38bdf8', symbol='diamond', line=dict(color='white', width=2)),
         text=["<b>Scanner_1</b>"],
         textposition="top center",
         hoverinfo='text',
         name="Scanner_1"
     ))
 
-    target_x, target_y, target_texts, point_labels, colors, marker_sizes = [], [], [], [], [], []
+    target_x, target_y, target_texts, dot_markers, font_sizes = [], [], [], [], []
     np.random.seed(42)
 
     for _, row in recent_devices.iterrows():
@@ -182,10 +172,8 @@ with tab_map:
         name_str = str(row[col_name])
 
         dot_icon = "⚪"
-        color = COLOR_MAP["SCONOSCIUTO"]
-        for key in COLOR_MAP:
+        for key in DOT_MAP:
             if key in evt_str:
-                color = COLOR_MAP[key]
                 dot_icon = DOT_MAP[key]
                 break
 
@@ -196,11 +184,8 @@ with tab_map:
 
         target_x.append(calc_x)
         target_y.append(calc_y)
-        colors.append(color)
-        marker_sizes.append(18 if "ENTRATO" in evt_str else 12)
-        
-        # Etichetta visibile sulla mappa con il pallino ed il nome dispositivo
-        point_labels.append(f"{dot_icon} {name_str}")
+        dot_markers.append(f"<b>{dot_icon}</b><br><span style='font-size:10px;'>{name_str}</span>")
+        font_sizes.append(22 if "ENTRATO" in evt_str else 16)
 
         target_texts.append(
             f"<b>Dispositivo:</b> {name_str}<br>"
@@ -209,16 +194,15 @@ with tab_map:
             f"<b>Distanza:</b> {dist:.2f} m"
         )
 
-    # Dispositivi rilevati sul Radar (ora con mode='markers+text' per mostrare i pallini/nomi)
+    # Rendering dei pallini emoji sul Radar
     if target_x:
         fig.add_trace(go.Scatter(
             x=target_x,
             y=target_y,
-            mode='markers+text',
-            marker=dict(size=marker_sizes, color=colors, opacity=0.9, line=dict(width=1.5, color='#ffffff')),
-            text=point_labels,
-            textposition="top center",
-            textfont=dict(color="#ffffff", size=11),
+            mode='text',
+            text=dot_markers,
+            textposition="middle center",
+            textfont=dict(size=font_sizes, color='#ffffff'),
             hovertext=target_texts,
             hoverinfo='text',
             name='Dispositivi BLE'
