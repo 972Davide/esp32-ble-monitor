@@ -80,11 +80,10 @@ def load_data(url):
     except Exception:
         return pd.DataFrame()
 
-# Funzione per identificare i MAC casuali / randomizzati (indirizzi locali)
+# Funzione per identificare i MAC casuali / randomizzati
 def is_random_mac(mac):
     try:
         first_byte = int(str(mac).replace("-", ":").split(':')[0], 16)
-        # Il secondo bit meno significativo del primo byte indica un MAC localmente amministrato (randomizzato)
         return bool(first_byte & 2)
     except:
         return False
@@ -117,16 +116,16 @@ df['dist_clean'] = df[col_dist].apply(parse_distance)
 st.sidebar.header("⚙️ Configurazione Centralino")
 
 filter_night_hours = st.sidebar.checkbox("Escludi rilevazioni 00:00 - 04:00", value=True)
-only_static_macs = st.sidebar.checkbox("Mostra solo MAC STATICI", value=False)
+exclude_static_macs = st.sidebar.checkbox("Escludi MAC STATICI", value=False)
 
 # Applicazione filtro orario (00:00 - 04:00)
 if filter_night_hours and col_time is not None:
     times_parsed = pd.to_datetime(df[col_time], errors='coerce').dt.hour
     df = df[~((times_parsed >= 0) & (times_parsed < 4))]
 
-# Applicazione filtro MAC Statici (esclude i MAC randomizzati se attivo)
-if only_static_macs:
-    df = df[~df[col_mac].apply(is_random_mac)]
+# Applicazione filtro Esclusione MAC Statici (mantiene solo i MAC randomizzati)
+if exclude_static_macs:
+    df = df[df[col_mac].apply(is_random_mac)]
 
 recent_devices = df.groupby(col_mac).last().reset_index()
 
