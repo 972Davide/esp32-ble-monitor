@@ -1,4 +1,3 @@
-       
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -61,6 +60,13 @@ DOT_MAP = {
     "SCONOSCIUTO": "⚪"
 }
 
+# --- RUBRICA DISPOSITIVI (Personalizza qui i nomi dei tuoi dispositivi) ---
+DEVICE_ALIAS_MAP = {
+    "03:e9:c5:2f:f1:b2": "Galaxy-A52",
+    # Aggiungi qui altri MAC noti per forzare un nome specifico:
+    # "aa:bb:cc:dd:ee:ff": "Cuffie Bluetooth",
+}
+
 TARGET_MAC = "03:e9:c5:2f:f1:b2"
 
 def parse_distance(val):
@@ -73,6 +79,23 @@ def parse_distance(val):
         avg = sum(floats) / len(floats)
         return max(avg, 0.1)
     return 1.0
+
+def get_friendly_name(mac, raw_name):
+    clean_mac = str(mac).replace("-", ":").lower()
+    
+    # 1. Priorità assoluta alla rubrica manuale
+    if clean_mac in DEVICE_ALIAS_MAP:
+        return DEVICE_ALIAS_MAP[clean_mac]
+    
+    # 2. Se l'ESP32 ha catturato un nome pulito e valido, usiamo quello
+    if pd.notna(raw_name):
+        cleaned = str(raw_name).strip()
+        if cleaned and cleaned.lower() not in ['nan', 'none', '', 'null', 'unknown', 'sconosciuto']:
+            return cleaned
+            
+    # 3. Fallback: nome strutturato basato sulle ultime cifre del MAC
+    short_mac = clean_mac[-5:].upper() if len(clean_mac) >= 5 else clean_mac
+    return f"BLE-Dev [{short_mac}]"
 
 @st.cache_data(ttl=2)
 def load_data(url):
@@ -102,11 +125,11 @@ c_uuid = cols[6] if len(cols) > 6 else None
 df = df.loc[:, ~df.columns.duplicated()]
 df['dist_clean'] = df[c_dist].apply(parse_distance) if c_dist else 1.0
 
-# Forzatura etichetta per il Galaxy-A52
+# Applicazione della logica di nome pulito/rubrica su tutto il DataFrame
 if c_name is not None and c_mac is not None:
-    df[c_name] = df[c_name].astype(str)
-    mask_target = df[c_mac].astype(str).str.replace("-", ":").str.lower() == TARGET_MAC.lower()
-    df.loc[mask_target, c_name] = "Galaxy-A52"
+    df['friendly_name'] = [get_friendly_name(m, n) for m, n in zip(df[c_mac], df[c_name])]
+else:
+    df['friendly_name'] = "Dispositivo Sconosciuto"
 
 # --- FILTRI NELLA BARRA LATERALE ---
 st.sidebar.header("⚙️ Configurazione")
@@ -119,8 +142,20 @@ if filter_night_hours and c_time is not None:
 
 recent_devices = df.groupby(c_mac).last().reset_index() if c_mac is not None else pd.DataFrame()
 
-mac_list = sorted(recent_devices[c_mac].dropna().astype(str).unique().tolist()) if not recent_devices.empty and c_mac else []
-my_mac = st.sidebar.selectbox("Centro Radar (Tuo MAC):", mac_list) if mac_list else ""
+mac_list = []
+mac_to_name_dict = {}
+if not recent_devices.empty and c_mac:
+    for _, row in recent_devices.iterrows():
+        m_val = str(row[c_mac])
+        f_name = row['friendly_name']
+        mac_list.append(m_val)
+        mac_to_name_dict[m_val] = f_name
+
+my_mac = st.sidebar.selectbox(
+    "Centro Radar (Tuo Dispositivo):", 
+    mac_list, 
+    format_func=lambda x: f"{mac_to_name_dict.get(x, x)} ({x})"
+) if mac_list else ""
 
 max_detected = recent_devices['dist_clean'].max() if not recent_devices.empty and 'dist_clean' in recent_devices.columns else 5.0
 radar_max_scale = float(max(10.0, np.ceil(max_detected / 5.0) * 5.0))
@@ -152,7 +187,6 @@ tab_map, tab_table, tab_target_mac = st.tabs([
 with tab_map:
     fig = go.Figure()
 
-    # Griglia cerchi concentrici
     step = 5.0
     for r in np.arange(step, radar_max_scale + 0.1, step):
         fig.add_shape(
@@ -164,14 +198,11 @@ with tab_map:
             font=dict(color="rgba(255,255,255,0.5)", size=10), yanchor="bottom"
         )
 
-    # Linee degli assi a croce stile radar
     fig.add_shape(type="line", x0=-radar_max_scale, y0=0, x1=radar_max_scale, y1=0, line=dict(color="rgba(255,255,255,0.1)", width=1))
     fig.add_shape(type="line", x0=0, y0=-radar_max_scale, x1=0, y1=radar_max_scale, line=dict(color="rgba(255,255,255,0.1)", width=1))
 
-    my_device_row = recent_devices[recent_devices[c_mac].astype(str) == str(my_mac)] if my_mac and c_mac else pd.DataFrame()
-    my_name = my_device_row[c_name].values[0] if not my_device_row.empty and c_name and pd.notna(my_device_row[c_name].values[0]) else "Centro"
+    my_name = mac_to_name_dict.get(my_mac, "Centro") if my_mac else "Centro"
 
-    # Traccia centro radar (TU)
     fig.add_trace(go.Scatter(
         x=[0], y=[0],
         mode='markers+text',
@@ -180,7 +211,7 @@ with tab_map:
         textposition="top center",
         textfont=dict(color="#38bdf8", size=11),
         hoverinfo='text',
-        hovertext=f"<b>DISPOSITIVO CENTRALE</b><br>MAC: {my_mac if my_mac else 'Non selezionato'}",
+        hovertext=f"<b>DISPOSITIVO CENTRALE</b><br>Nome: {my_name}<br>MAC: {my_mac if my_mac else 'Non selezionato'}",
         name="Centro"
     ))
 
@@ -193,11 +224,10 @@ with tab_map:
             r_dist = float(row['dist_clean'])
             evt_str = str(row[c_event]).upper() if c_event else ""
             mac_str = str(row[c_mac]) if c_mac else ""
-            name_str = str(row[c_name]) if c_name else ""
+            friendly_n = row['friendly_name']
             tx_val = row.get(c_tx, 'N/D') if c_tx and c_tx in row else 'N/D'
             uuid_val = row.get(c_uuid, 'N/D') if c_uuid and c_uuid in row else 'N/D'
 
-            # Posizionamento angolare stabile anti-jitter basato sul MAC
             mac_hash = sum(ord(c) for c in mac_str)
             angle = (mac_hash % 360) * (np.pi / 180.0)
 
@@ -217,11 +247,10 @@ with tab_map:
             marker_colors.append(color)
             marker_sizes.append(14 if "ENTRATO" in evt_str else 10)
 
-            label_name = name_str if pd.notna(name_str) and str(name_str).strip() != 'nan' else mac_str
-            point_labels.append(f"{dot_icon} {label_name} ({r_dist:.1f}m)")
+            point_labels.append(f"{dot_icon} {friendly_n} ({r_dist:.1f}m)")
 
             target_texts.append(
-                f"<b>Dispositivo:</b> {name_str}<br>"
+                f"<b>Dispositivo:</b> {friendly_n}<br>"
                 f"<b>MAC:</b> {mac_str}<br>"
                 f"<b>Stato:</b> {dot_icon} {evt_str}<br>"
                 f"<b>Distanza:</b> {r_dist:.2f} m<br>"
@@ -266,6 +295,10 @@ with tab_table:
     if not display_df.empty:
         if c_event:
             display_df[c_event] = display_df[c_event].apply(get_status_dot)
+        
+        if c_name in display_df.columns:
+            display_df[c_name] = display_df['friendly_name']
+
         cols_to_show = [c for c in [c_time, c_name, c_mac, c_dist, c_tx, c_uuid, c_event] if c is not None]
         cols_to_show = list(dict.fromkeys(cols_to_show))
         
@@ -283,7 +316,7 @@ with tab_target_mac:
     
     if not df_target_history.empty:
         latest_target_row = df_target_history.iloc[-1]
-        t_name = latest_target_row.get(c_name, "Galaxy-A52") if c_name else "Galaxy-A52"
+        t_name = latest_target_row.get('friendly_name', "Galaxy-A52")
         t_dist = latest_target_row.get('dist_clean', 0.0)
         t_event = latest_target_row.get(c_event, "N/D") if c_event else "N/D"
         t_tx = latest_target_row.get(c_tx, "N/D") if c_tx else "N/D"
@@ -330,6 +363,9 @@ with tab_target_mac:
         display_target_df = df_target_history.copy()
         if c_event:
             display_target_df[c_event] = display_target_df[c_event].apply(get_status_dot)
+        if c_name in display_target_df.columns:
+            display_target_df[c_name] = display_target_df['friendly_name']
+            
         cols_target_show = [c for c in [c_time, c_name, c_mac, c_dist, c_tx, c_uuid, c_event] if c is not None]
         cols_target_show = list(dict.fromkeys(cols_target_show))
         
