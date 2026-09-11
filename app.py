@@ -87,33 +87,46 @@ def is_random_mac(mac):
     except:
         return False
 
-# --- ELABORAZIONE DATI ---
+# --- ELABORAZIONE DATI & RICONOSCIMENTO ROBUSTO COLONNE ---
 df_raw = load_data(SHEET_CSV_URL)
 
 if df_raw.empty:
     st.error("⚠️ Impossibile caricare i dati dal Google Sheet.")
     st.stop()
 
-cols_lower = [c.lower() for c in df_raw.columns]
+col_time, col_name, col_mac, col_dist, col_event, col_tx, col_uuid = None, None, None, None, None, None, None
 
-def find_col(keywords, default_idx):
-    for idx, c in enumerate(cols_lower):
-        if any(kw in c for kw in keywords):
-            return df_raw.columns[idx]
-    return df_raw.columns[default_idx] if len(df_raw.columns) > default_idx else None
+for col in df_raw.columns:
+    c_low = str(col).lower()
+    sample = df_raw[col].dropna().astype(str).head(15).tolist()
+    
+    if any(any(kw in s.upper() for kw in ["ENTRATO", "USCITO", "PRESENTE", "SPOSTATO"]) for s in sample):
+        col_event = col
+    elif any(re.search(r'([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}', s) for s in sample):
+        col_mac = col
+    elif any(re.search(r'\d{2}/\d{2}/\d{4}', s) for s in sample) or 'time' in c_low or 'data' in c_low or 'ora' in c_low:
+        if col_time is None:
+            col_time = col
+    elif any(kw in c_low for kw in ['dist', 'metri', 'rssi']):
+        col_dist = col
+    elif any(kw in c_low for kw in ['nam', 'nom', 'dev']):
+        col_name = col
+    elif any(kw in c_low for kw in ['tx', 'power']):
+        col_tx = col
+    elif any(kw in c_low for kw in ['uuid', 'service']):
+        col_uuid = col
 
-col_time = find_col(['time', 'data', 'ora', 'timestamp'], 0)
-col_name = find_col(['nam', 'nom', 'dev'], 1)
-col_mac = find_col(['mac', 'address', 'indirizzo'], 2)
-col_dist = find_col(['dist', 'rssi', 'metri'], 3)
-col_event = find_col(['event', 'stato', 'status', 'allarme'], 4)
-col_tx = find_col(['tx', 'power'], 5)
-col_uuid = find_col(['uuid', 'service'], 6)
+# Fallbacks se qualche colonna non viene identificata automaticamente
+if col_time is None and len(df_raw.columns) > 0: col_time = df_raw.columns[0]
+if col_name is None and len(df_raw.columns) > 1: col_name = df_raw.columns[1]
+if col_mac is None and len(df_raw.columns) > 2: col_mac = df_raw.columns[2]
+if col_dist is None and len(df_raw.columns) > 3: col_dist = df_raw.columns[3]
+if col_event is None and len(df_raw.columns) > 4: col_event = df_raw.columns[4]
 
 df = df_raw.copy()
 df['dist_clean'] = df[col_dist].apply(parse_distance)
 
-# Conversione della colonna nome a stringa e forzatura nome per il nuovo MAC target
+# Conversione nome e forzatura etichetta per il Galaxy-A52 (MAC: 03:e9:c5:2f:f1:b2)
 TARGET_MAC = "03:e9:c5:2f:f1:b2"
 target_clean_mac = TARGET_MAC.replace("-", ":").lower()
 
@@ -135,7 +148,7 @@ if filter_night_hours and col_time is not None:
     df = df[~((times_parsed >= 0) & (times_parsed < 4))]
 
 # Applicazione filtro Esclusione MAC Statici
-if exclude_static_macs:
+if exclude_static_macs and col_mac is not None:
     df = df[df[col_mac].apply(is_random_mac)]
 
 # Applicazione filtro Esclusione MAC specifici (mantenendo immune il target)
@@ -152,12 +165,12 @@ if exclude_specific_macs and col_mac is not None:
     blacklisted_clean = {m.replace("-", ":").lower() for m in blacklisted_macs}
     df = df[~df[col_mac].astype(str).str.replace("-", ":").str.lower().isin(blacklisted_clean)]
 
-recent_devices = df.groupby(col_mac).last().reset_index()
+recent_devices = df.groupby(col_mac).last().reset_index() if col_mac is not None else pd.DataFrame()
 
-mac_list = sorted(recent_devices[col_mac].dropna().astype(str).unique().tolist()) if not recent_devices.empty else []
+mac_list = sorted(recent_devices[col_mac].dropna().astype(str).unique().tolist()) if not recent_devices.empty and col_mac else []
 my_mac = st.sidebar.selectbox("Seleziona il TUO MAC (Centro Radar):", mac_list) if mac_list else ""
 
-max_detected = recent_devices['dist_clean'].max() if not recent_devices.empty else 5.0
+max_detected = recent_devices['dist_clean'].max() if not recent_devices.empty and 'dist_clean' in recent_devices.columns else 5.0
 radar_max_scale = float(max(10.0, np.ceil(max_detected / 5.0) * 5.0))
 
 def get_status_dot(evt):
@@ -169,7 +182,7 @@ def get_status_dot(evt):
 
 # --- METRICHE ---
 k1, k2, k3, k4 = st.columns(4)
-active_alarms = sum(1 for e in recent_devices[col_event].astype(str) if "ENTRATO" in e.upper()) if not recent_devices.empty else 0
+active_alarms = sum(1 for e in recent_devices[col_event].astype(str) if "ENTRATO" in e.upper()) if not recent_devices.empty and col_event else 0
 last_update = str(df[col_time].iloc[-1]) if col_time and not df.empty else "--"
 
 k1.metric("Stato Perimetro", "🔴 INTRUSIONE" if active_alarms > 0 else "🟢 SICURO")
@@ -200,10 +213,10 @@ with tab_map:
             font=dict(color="rgba(255,255,255,0.6)", size=11), yanchor="bottom"
         )
 
-    my_device_row = recent_devices[recent_devices[col_mac].astype(str) == str(my_mac)] if my_mac else pd.DataFrame()
-    other_devices = recent_devices[recent_devices[col_mac].astype(str) != str(my_mac)].copy() if my_mac else recent_devices.copy()
+    my_device_row = recent_devices[recent_devices[col_mac].astype(str) == str(my_mac)] if my_mac and col_mac else pd.DataFrame()
+    other_devices = recent_devices[recent_devices[col_mac].astype(str) != str(my_mac)].copy() if my_mac and col_mac else recent_devices.copy()
 
-    my_name = my_device_row[col_name].values[0] if not my_device_row.empty and pd.notna(my_device_row[col_name].values[0]) else my_mac
+    my_name = my_device_row[col_name].values[0] if not my_device_row.empty and col_name and pd.notna(my_device_row[col_name].values[0]) else my_mac
 
     fig.add_trace(go.Scatter(
         x=[0], y=[0],
@@ -224,9 +237,9 @@ with tab_map:
 
         for idx, (_, row) in enumerate(other_devices.iterrows()):
             r_dist = float(row['dist_clean'])
-            evt_str = str(row[col_event]).upper()
-            mac_str = str(row[col_mac])
-            name_str = str(row[col_name])
+            evt_str = str(row[col_event]).upper() if col_event else ""
+            mac_str = str(row[col_mac]) if col_mac else ""
+            name_str = str(row[col_name]) if col_name else ""
             tx_val = row.get(col_tx, 'N/D') if col_tx and col_tx in row else 'N/D'
             uuid_val = row.get(col_uuid, 'N/D') if col_uuid and col_uuid in row else 'N/D'
 
@@ -253,7 +266,6 @@ with tab_map:
             target_texts.append(
                 f"<b>Dispositivo:</b> {name_str}<br>"
                 f"<b>MAC:</b> {mac_str}<br>"
-                f"<b>IP:</b> 192.168.1.21 (Selezionato)<br>"
                 f"<b>Stato:</b> {dot_icon} {evt_str}<br>"
                 f"<b>Distanza:</b> {r_dist:.2f} m<br>"
                 f"<b>TX Power:</b> {tx_val} dBm<br>"
@@ -296,7 +308,8 @@ with tab_table:
     st.subheader("📋 Registro Dettagliato Dispositivi")
     display_df = recent_devices.copy()
     if not display_df.empty:
-        display_df[col_event] = display_df[col_event].apply(get_status_dot)
+        if col_event:
+            display_df[col_event] = display_df[col_event].apply(get_status_dot)
         cols_to_show = [c for c in [col_time, col_name, col_mac, col_dist, col_tx, col_uuid, col_event] if c is not None]
         
         st.dataframe(
@@ -322,21 +335,21 @@ with tab_new_mac:
         else:
             st.info("Nessun nuovo dispositivo contrassegnato come 'ENTRATO' trovato nei dati filtrati correnti.")
     else:
-        st.warning("Dati non disponibili per popolare la tabella dei nuovi MAC.")
+        st.warning("Colonna eventi non disponibile per popolare la tabella dei nuovi MAC.")
 
 with tab_target_mac:
     st.subheader("📱 Monitoraggio Mirato: Galaxy-A52")
     
-    df_target_history = df[df[col_mac].astype(str).str.replace("-", ":").str.lower() == target_clean_mac].copy()
+    df_target_history = df[df[col_mac].astype(str).str.replace("-", ":").str.lower() == target_clean_mac].copy() if col_mac else pd.DataFrame()
     
     if not df_target_history.empty:
         latest_target_row = df_target_history.iloc[-1]
-        t_name = latest_target_row.get(col_name, "Galaxy-A52")
+        t_name = latest_target_row.get(col_name, "Galaxy-A52") if col_name else "Galaxy-A52"
         t_dist = latest_target_row.get('dist_clean', 0.0)
-        t_event = latest_target_row.get(col_event, "N/D")
-        t_tx = latest_target_row.get(col_tx, "N/D")
-        t_uuid = latest_target_row.get(col_uuid, "N/D")
-        t_time = latest_target_row.get(col_time, "N/D")
+        t_event = latest_target_row.get(col_event, "N/D") if col_event else "N/D"
+        t_tx = latest_target_row.get(col_tx, "N/D") if col_tx else "N/D"
+        t_uuid = latest_target_row.get(col_uuid, "N/D") if col_uuid else "N/D"
+        t_time = latest_target_row.get(col_time, "N/D") if col_time else "N/D"
         
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Nome", str(t_name))
@@ -346,10 +359,9 @@ with tab_target_mac:
         
         st.markdown("---")
         
-        c_info1, c_info2, c_info3 = st.columns(3)
+        c_info1, c_info2 = st.columns(2)
         c_info1.info(f"**MAC Address:** `{TARGET_MAC}`")
-        c_info2.info(f"**Indirizzo IP:** `192.168.1.21`")
-        c_info3.info(f"**TX Power:** `{t_tx}` dBm | **UUID:** `{t_uuid}`")
+        c_info2.info(f"**TX Power:** `{t_tx}` dBm | **Service UUID:** `{t_uuid}`")
         
         st.markdown("### 📈 Storico Distanza")
         if col_time is not None and not df_target_history.empty:
@@ -375,9 +387,10 @@ with tab_target_mac:
             )
             st.plotly_chart(fig_target, use_container_width=True)
             
-        st.markdown("### 🕒 Tabella Eventi del Galaxy-A52 (IP: 192.168.1.21)")
+        st.markdown("### 🕒 Tabella Eventi del Galaxy-A52")
         display_target_df = df_target_history.copy()
-        display_target_df[col_event] = display_target_df[col_event].apply(get_status_dot)
+        if col_event:
+            display_target_df[col_event] = display_target_df[col_event].apply(get_status_dot)
         cols_target_show = [c for c in [col_time, col_name, col_mac, col_dist, col_tx, col_uuid, col_event] if c is not None]
         
         st.dataframe(
@@ -386,4 +399,4 @@ with tab_target_mac:
             height=300
         )
     else:
-        st.warning(f"Nessun dato registrato o trovato nel Google Sheet per il MAC `{TARGET_MAC}` (Galaxy-A52 associato a IP `192.168.1.21`).")
+        st.warning(f"Nessun dato registrato o trovato nel Google Sheet per il MAC `{TARGET_MAC}` (Galaxy-A52).")
