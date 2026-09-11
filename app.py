@@ -75,7 +75,9 @@ def parse_distance(val):
 def load_data(url):
     try:
         df = pd.read_csv(url)
+        # Rimuove spazi dai nomi delle colonne e rimuove eventuali colonne duplicate
         df.columns = df.columns.str.strip()
+        df = df.loc[:, ~df.columns.duplicated()]
         return df
     except Exception:
         return pd.DataFrame()
@@ -124,6 +126,8 @@ if col_dist is None and len(df_raw.columns) > 3: col_dist = df_raw.columns[3]
 if col_event is None and len(df_raw.columns) > 4: col_event = df_raw.columns[4]
 
 df = df_raw.copy()
+# Assicura che non ci siano colonne duplicate nel DataFrame di lavoro
+df = df.loc[:, ~df.columns.duplicated()]
 df['dist_clean'] = df[col_dist].apply(parse_distance)
 
 # Conversione nome e forzatura etichetta per il Galaxy-A52 (MAC: 03:e9:c5:2f:f1:b2)
@@ -311,6 +315,8 @@ with tab_table:
         if col_event:
             display_df[col_event] = display_df[col_event].apply(get_status_dot)
         cols_to_show = [c for c in [col_time, col_name, col_mac, col_dist, col_tx, col_uuid, col_event] if c is not None]
+        # Rimuove eventuali duplicati nella lista delle colonne per evitare ValueError su sort_values
+        cols_to_show = list(dict.fromkeys(cols_to_show))
         
         st.dataframe(
             display_df[cols_to_show].sort_values(by=col_dist, ascending=True),
@@ -326,6 +332,7 @@ with tab_new_mac:
         if not new_entries_df.empty:
             new_entries_df['status_formatted'] = new_entries_df[col_event].apply(get_status_dot)
             cols_to_show = [c for c in [col_time, col_name, col_mac, col_dist, col_tx, col_uuid, col_event] if c is not None]
+            cols_to_show = list(dict.fromkeys(cols_to_show))
             
             st.dataframe(
                 new_entries_df[cols_to_show].drop_duplicates(subset=[col_mac]).sort_values(by=col_time, ascending=False),
@@ -392,6 +399,7 @@ with tab_target_mac:
         if col_event:
             display_target_df[col_event] = display_target_df[col_event].apply(get_status_dot)
         cols_target_show = [c for c in [col_time, col_name, col_mac, col_dist, col_tx, col_uuid, col_event] if c is not None]
+        cols_target_show = list(dict.fromkeys(cols_target_show))
         
         st.dataframe(
             display_target_df[cols_target_show].sort_values(by=col_time, ascending=False),
