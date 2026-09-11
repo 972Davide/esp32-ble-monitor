@@ -8,7 +8,7 @@ st_autorefresh(interval=5000, key="refresh")
 
 st.title("📡 BLE Scanner & Device List")
 
-SHEET_CSV_URL = "INSERISCI_QUI_URL_CSV_GOOGLE_SHEET"
+SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQfyw4jBL1NZwI9KC4KaYEIVzcJPBOfabbBgBdF0j35liabae4rn0NbYU2lrY6-4NYsEY-MFaP0OSl8/pub?output=csv"
 
 # --- RUBRICA NOMI PERSONALIZZATI (MAC -> Nome Chiaro) ---
 DEVICE_ALIAS_MAP = {
