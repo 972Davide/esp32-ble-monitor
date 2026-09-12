@@ -15,7 +15,7 @@ st.set_page_config(
 st_autorefresh(interval=5000, key="datarefresh")
 
 st.title("📡 ESP32 Advanced BLE & Wi-Fi Network Dashboard")
-st.markdown("Monitoraggio in tempo reale dei dispositivi Bluetooth Low Energy (con stima della distanza e RSSI esteso) e dei client connessi in Wi-Fi (IP/LAN).")
+st.markdown("Monitoraggio in tempo reale dei dispositivi Bluetooth Low Energy e dei client connessi in Wi-Fi (IP/LAN).")
 
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQfyw4jBL1NZwI9KC4KaYEIVzcJPBOfabbBgBdF0j35liabae4rn0NbYU2lrY6-4NYsEY-MFaP0OSl8/pub?output=csv"
 
@@ -77,7 +77,16 @@ df_wifi = get_wifi_devices()
 
 # --- SEZIONE METRICHE GLOBALI IN ALTO ---
 col_m1, col_m2, col_m3 = st.columns(3)
-total_ble_devices = df_ble['mac'].nunique() if not df_ble.empty and 'mac' in df_ble.columns else 0
+
+# Identificazione dinamica della colonna MAC per le metriche
+mac_col_name = None
+if not df_ble.empty:
+    for col in df_ble.columns:
+        if 'mac' in col.lower():
+            mac_col_name = col
+            break
+
+total_ble_devices = df_ble[mac_col_name].nunique() if not df_ble.empty and mac_col_name else 0
 total_wifi_devices = len(df_wifi) if not df_wifi.empty else 0
 
 col_m1.metric("📶 Dispositivi BLE Unici Rilevati", total_ble_devices)
@@ -96,17 +105,28 @@ tab_ble, tab_wifi, tab_charts = st.tabs([
 with tab_ble:
     st.subheader("📋 Tabella Completa Rilevamenti Bluetooth Low Energy")
     if not df_ble.empty:
-        # Pulizia e mappatura colonne basate sulla struttura inviata dall'ESP32
-        # Campi attesi nel Google Sheet: Timestamp (o simile), name, mac, rssi, tx_power, service_uuid, distance, event
-        cols = list(df_ble.columns)
+        # Pulizia automatica dei nomi delle colonne (rimuove spazi e converte in minuscolo per sicurezza)
+        df_ble.columns = [str(c).strip().lower() for c in df_ble.columns]
         
-        # Gestione flessibile delle colonne del foglio
-        c_time = cols[0] if len(cols) > 0 else 'Timestamp'
-        c_name = 'name' if 'name' in cols else cols[1]
-        c_mac = 'mac' if 'mac' in cols else cols[2]
-        c_rssi = 'rssi' if 'rssi' in cols else 'RSSI'
-        c_dist = 'distance' if 'distance' in cols else 'Distance'
-        c_event = 'event' if 'event' in cols else 'Event'
+        # Mappa intelligente delle colonne in base al contenuto inviato dall'ESP32
+        col_map = {}
+        for c in df_ble.columns:
+            if 'time' in c or 'data' in c or 'timestamp' in c: col_map['time'] = c
+            elif c == 'name': col_map['name'] = c
+            elif c == 'mac': col_map['mac'] = c
+            elif c == 'rssi': col_map['rssi'] = c
+            elif 'tx' in c: col_map['tx_power'] = c
+            elif 'uuid' in c: col_map['uuid'] = c
+            elif 'dist' in c: col_map['distance'] = c
+            elif 'event' in c: col_map['event'] = c
+
+        # Fallback sulle posizioni se i nomi non combaciano
+        cols_list = list(df_ble.columns)
+        c_time = col_map.get('time', cols_list[0] if len(cols_list) > 0 else 'time')
+        c_name = col_map.get('name', cols_list[1] if len(cols_list) > 1 else 'name')
+        c_mac = col_map.get('mac', cols_list[2] if len(cols_list) > 2 else 'mac')
+        c_rssi = col_map.get('rssi', cols_list[3] if len(cols_list) > 3 else 'rssi')
+        c_dist = col_map.get('distance', cols_list[6] if len(cols_list) > 6 else 'distance')
 
         # Applica i nomi puliti della rubrica
         df_ble['friendly_name'] = [get_friendly_name(m, n) for m, n in zip(df_ble[c_mac], df_ble[c_name])]
@@ -115,7 +135,7 @@ with tab_ble:
         display_ble = df_ble.groupby(c_mac).last().reset_index()
         display_ble[c_name] = display_ble['friendly_name']
 
-        # Filtri interattivi laterali o superiori
+        # Filtro di ricerca testuale
         search_query = st.text_input("🔍 Filtra per Nome o MAC BLE:", "")
         if search_query:
             display_ble = display_ble[
@@ -123,9 +143,11 @@ with tab_ble:
                 display_ble[c_mac].str.contains(search_query, case=False, na=False)
             ]
 
-        # Tabella pulita e ordinata per vicinanza (distanza stimata)
+        # Seleziona solo le colonne effettivamente presenti nel DataFrame per evitare errori
+        available_cols = [col for col in [c_time, c_name, c_mac, c_rssi, c_dist, col_map.get('event')] if col and col in display_ble.columns]
+
         st.dataframe(
-            display_ble[[c_time, c_name, c_mac, c_rssi, c_dist, c_event]].sort_values(by=c_dist, ascending=True),
+            display_ble[available_cols].sort_values(by=c_dist, ascending=True) if c_dist in display_ble.columns else display_ble[available_cols],
             use_container_width=True
         )
     else:
@@ -156,4 +178,4 @@ with tab_charts:
             if not chart_data.empty:
                 st.bar_chart(chart_data.set_index('friendly_name')['rssi'])
     else:
-        st.info("Dati insufficienti per generare i grafici statistici.")
+        st.info("Dati insufficienti o colonne mancanti per generare i grafici statistici.")
