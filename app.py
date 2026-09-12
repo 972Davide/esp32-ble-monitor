@@ -75,18 +75,23 @@ def get_wifi_devices():
 df_ble = load_ble_data(SHEET_CSV_URL)
 df_wifi = get_wifi_devices()
 
+# --- NORMALIZZAZIONE E MAPPATURA COLONNE BLE ---
+if not df_ble.empty:
+    # Salva le colonne originali e crea una copia con chiavi minuscole e senza spazi per la ricerca
+    df_ble.columns = [str(c).strip() for c in df_ble.columns]
+    col_map_lower = {c.lower(): c for c in df_ble.columns}
+    
+    # Identifica le chiavi esatte nel dataframe
+    c_name_key = col_map_lower.get('name', df_ble.columns[1] if len(df_ble.columns) > 1 else None)
+    c_mac_key = col_map_lower.get('mac', df_ble.columns[2] if len(df_ble.columns) > 2 else None)
+    c_rssi_key = col_map_lower.get('rssi', col_map_lower.get('lastrssi', None))
+    c_dist_key = col_map_lower.get('distance', col_map_lower.get('lastdistance', None))
+else:
+    c_name_key, c_mac_key, c_rssi_key, c_dist_key = None, None, None, None
+
 # --- SEZIONE METRICHE GLOBALI IN ALTO ---
 col_m1, col_m2, col_m3 = st.columns(3)
-
-# Identificazione dinamica della colonna MAC per le metriche
-mac_col_name = None
-if not df_ble.empty:
-    for col in df_ble.columns:
-        if 'mac' in col.lower():
-            mac_col_name = col
-            break
-
-total_ble_devices = df_ble[mac_col_name].nunique() if not df_ble.empty and mac_col_name else 0
+total_ble_devices = df_ble[c_mac_key].nunique() if not df_ble.empty and c_mac_key else 0
 total_wifi_devices = len(df_wifi) if not df_wifi.empty else 0
 
 col_m1.metric("📶 Dispositivi BLE Unici Rilevati", total_ble_devices)
@@ -104,78 +109,62 @@ tab_ble, tab_wifi, tab_charts = st.tabs([
 
 with tab_ble:
     st.subheader("📋 Tabella Completa Rilevamenti Bluetooth Low Energy")
-    if not df_ble.empty:
-        # Pulizia automatica dei nomi delle colonne (rimuove spazi e converte in minuscolo per sicurezza)
-        df_ble.columns = [str(c).strip().lower() for c in df_ble.columns]
-        
-        # Mappa intelligente delle colonne in base al contenuto inviato dall'ESP32
-        col_map = {}
-        for c in df_ble.columns:
-            if 'time' in c or 'data' in c or 'timestamp' in c: col_map['time'] = c
-            elif c == 'name': col_map['name'] = c
-            elif c == 'mac': col_map['mac'] = c
-            elif c == 'rssi': col_map['rssi'] = c
-            elif 'tx' in c: col_map['tx_power'] = c
-            elif 'uuid' in c: col_map['uuid'] = c
-            elif 'dist' in c: col_map['distance'] = c
-            elif 'event' in c: col_map['event'] = c
-
-        # Fallback sulle posizioni se i nomi non combaciano
-        cols_list = list(df_ble.columns)
-        c_time = col_map.get('time', cols_list[0] if len(cols_list) > 0 else 'time')
-        c_name = col_map.get('name', cols_list[1] if len(cols_list) > 1 else 'name')
-        c_mac = col_map.get('mac', cols_list[2] if len(cols_list) > 2 else 'mac')
-        c_rssi = col_map.get('rssi', cols_list[3] if len(cols_list) > 3 else 'rssi')
-        c_dist = col_map.get('distance', cols_list[6] if len(cols_list) > 6 else 'distance')
-
+    if not df_ble.empty and c_mac_key:
         # Applica i nomi puliti della rubrica
-        df_ble['friendly_name'] = [get_friendly_name(m, n) for m, n in zip(df_ble[c_mac], df_ble[c_name])]
+        df_ble['friendly_name'] = [get_friendly_name(m, n) for m, n in zip(df_ble[c_mac_key], df_ble[c_name_key])] if c_name_key else "Device"
         
         # Filtra per mostrare l'ultimo stato noto di ogni dispositivo
-        display_ble = df_ble.groupby(c_mac).last().reset_index()
-        display_ble[c_name] = display_ble['friendly_name']
+        display_ble = df_ble.groupby(c_mac_key).last().reset_index()
+        if c_name_key:
+            display_ble[c_name_key] = display_ble['friendly_name']
 
         # Filtro di ricerca testuale
         search_query = st.text_input("🔍 Filtra per Nome o MAC BLE:", "")
-        if search_query:
+        if search_query and c_name_key:
             display_ble = display_ble[
-                display_ble[c_name].str.contains(search_query, case=False, na=False) |
-                display_ble[c_mac].str.contains(search_query, case=False, na=False)
+                display_ble[c_name_key].str.contains(search_query, case=False, na=False) |
+                display_ble[c_mac_key].str.contains(search_query, case=False, na=False)
             ]
 
-        # Seleziona solo le colonne effettivamente presenti nel DataFrame per evitare errori
-        available_cols = [col for col in [c_time, c_name, c_mac, c_rssi, c_dist, col_map.get('event')] if col and col in display_ble.columns]
-
         st.dataframe(
-            display_ble[available_cols].sort_values(by=c_dist, ascending=True) if c_dist in display_ble.columns else display_ble[available_cols],
+            display_ble.sort_values(by=c_dist_key, ascending=True) if c_dist_key and c_dist_key in display_ble.columns else display_ble,
             use_container_width=True
         )
     else:
-        st.warning("⚠️ Nessun dato BLE disponibile dal Google Sheet. Verifica che l'ESP32 stia inviando correttamente i dati.")
+        st.warning("⚠️ Nessun dato BLE disponibile dal Google Sheet o colonne non riconosciute.")
 
 with tab_wifi:
     st.subheader("🌐 Dispositivi Connessi alla Rete Locale (IP & MAC)")
     if not df_wifi.empty:
         st.dataframe(df_wifi[['IP', 'MAC', 'Nome', 'Tipo']], use_container_width=True)
     else:
-        st.info("ℹ️ Nessun dispositivo Wi-Fi rilevato tramite tabella ARP locale (verifica i permessi di esecuzione su Ubuntu).")
+        st.info("ℹ️ Nessun dispositivo Wi-Fi rilevato tramite tabella ARP locale (verifica i permessi su Ubuntu).")
 
 with tab_charts:
     st.subheader("📊 Analisi Grafica dei Dispositivi BLE")
-    if not df_ble.empty and 'distance' in df_ble.columns and 'rssi' in df_ble.columns:
-        chart_data = df_ble.groupby('mac').last().reset_index()
-        chart_data['friendly_name'] = [get_friendly_name(m, n) for m, n in zip(chart_data['mac'], chart_data['name'])]
+    if not df_ble.empty and c_mac_key:
+        chart_data = df_ble.groupby(c_mac_key).last().reset_index()
+        
+        # Genera il nome pulito per l'asse dei grafici
+        if c_name_key and c_name_key in chart_data.columns:
+            chart_data['chart_label'] = [get_friendly_name(m, n) for m, n in zip(chart_data[c_mac_key], chart_data[c_name_key])]
+        else:
+            chart_data['chart_label'] = chart_data[c_mac_key]
 
         col_c1, col_c2 = st.columns(2)
 
         with col_c1:
             st.markdown("##### 📏 Stima Distanza per Dispositivo (metri)")
-            if not chart_data.empty:
-                st.bar_chart(chart_data.set_index('friendly_name')['distance'])
+            if c_dist_key and c_dist_key in chart_data.columns:
+                st.bar_chart(chart_data.set_index('chart_label')[c_dist_key])
+            else:
+                st.info("Colonna distanza non trovata per il grafico.")
 
         with col_c2:
             st.markdown("##### 📶 Potenza del Segnale RSSI (dBm)")
-            if not chart_data.empty:
-                st.bar_chart(chart_data.set_index('friendly_name')['rssi'])
+            if c_rssi_key and c_rssi_key in chart_data.columns:
+                st.bar_chart(chart_data.set_index('chart_label')[c_rssi_key])
+            else:
+                st.info("Colonna RSSI non trovata per il grafico.")
     else:
-        st.info("Dati insufficienti o colonne mancanti per generare i grafici statistici.")
+        st.info("Dati insufficienti per generare i grafici statistici.")
